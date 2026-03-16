@@ -1,62 +1,66 @@
+// server.js
 require('dotenv').config();
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
 const cors = require('cors');
-const db = require('./db');
+const mysql = require('mysql2/promise');
 
 const app = express();
 
-// Разрешаем ваш домен
+// ВАЖНО: разрешить CORS с вашего сайта
 app.use(cors({
     origin: "https://service-taxi31.ru",
-    methods: ["GET", "POST"]
+    methods: ["GET", "POST"],
+    credentials: true
 }));
 
 const server = http.createServer(app);
+
 const io = socketIo(server, {
     cors: {
         origin: "https://service-taxi31.ru",
         methods: ["GET", "POST"],
         credentials: true
-    }
+    },
+    // 🔥 Ключевые настройки для работы за прокси (Render, Heroku и др.)
+    transports: ['polling', 'websocket'], // явно указываем
+    allowEIO3: false,
+    cookie: false
 });
 
-// Храним подключения
-const socketUsers = new Map(); // socket → { user_id, chat_id }
+// Храним: socket → { user_id, chat_id }
+const socketUsers = new Map();
 
 io.on('connection', (socket) => {
-    console.log('Пользователь подключён:', socket.id);
+    console.log('🟢 Пользователь подключён:', socket.id);
 
-    // Присоединение к чату
-    socket.on('join', ({ user_id, chat_id }) => {
+    socket.on('join', async ({ user_id, chat_id }) => {
         socket.join(`chat_${chat_id}`);
         socketUsers.set(socket, { user_id, chat_id });
         console.log(`User ${user_id} joined chat_${chat_id}`);
     });
 
-    // Приём сообщения
     socket.on('send_message', async (data) => {
         const userInfo = socketUsers.get(socket);
-        if (!userInfo) return;
+        if (!userInfo) return socket.emit('error', { message: 'Not authorized' });
 
         const { message_text } = data;
         const { user_id, chat_id } = userInfo;
 
         try {
-            // Сохраняем в БД
-            await db.execute(
-                "INSERT INTO messages (chat_id, sender_id, content) VALUES (?, ?, ?)",
+            const [result] = await db.execute(
+                "INSERT INTO messages (chat_id, sender_id, content, sent_at) VALUES (?, ?, ?, NOW())",
                 [chat_id, user_id, message_text]
             );
 
-            // Получаем имя пользователя
+            const messageId = result.insertId;
+
             const [rows] = await db.execute("SELECT username FROM users WHERE id = ?", [user_id]);
             const username = rows[0]?.username || 'Аноним';
 
-            // Рассылаем всем в чате
             io.to(`chat_${chat_id}`).emit('new_message', {
-                id: Date.now(), // можно заменить на lastInsertId
+                id: messageId,
                 chat_id,
                 sender_id: user_id,
                 content: message_text,
@@ -64,12 +68,11 @@ io.on('connection', (socket) => {
                 username
             });
         } catch (err) {
-            console.error('Ошибка записи в БД:', err);
+            console.error('🔴 Ошибка БД:', err);
             socket.emit('error', { message: 'Не удалось отправить сообщение' });
         }
     });
 
-    // Отключение
     socket.on('disconnect', () => {
         const userInfo = socketUsers.get(socket);
         if (userInfo) {
@@ -77,12 +80,12 @@ io.on('connection', (socket) => {
             socket.to(`chat_${chat_id}`).emit('user_left', { user_id });
         }
         socketUsers.delete(socket);
-        console.log('Пользователь отключён:', socket.id);
+        console.log('🔴 Пользователь отключён:', socket.id);
     });
 });
 
+// ✅ Порт из переменной окружения + 0.0.0.0
 const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
     console.log(`🌐 Сервер запущен на порту ${PORT}`);
 });
-
