@@ -1,47 +1,39 @@
 <?php
 // api/search_users.php
-
 header("Access-Control-Allow-Origin: *");
-header("Access-Control-Allow-Methods: GET, OPTIONS");
-header("Access-Control-Allow-Headers: Content-Type");
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(200);
-    exit;
-}
-
 header("Content-Type: application/json");
+
 include 'db.php';
 
-$search = trim($_GET['q'] ?? '');
-$user_id = $_GET['user_id'] ?? null;
+$current_user_id = $_GET['user_id'] ?? 0;
+$q = trim($_GET['q'] ?? '');
 
-if (!$user_id) {
-    http_response_code(400);
-    echo json_encode(['error' => 'user_id обязателен']);
-    exit;
-}
-
-if (strlen($search) < 2) {
+if (strlen($q) < 2) {
     echo json_encode(['users' => []]);
     exit;
 }
 
+// Очищаем запрос для поиска по телефону
+$phone_query = preg_replace('/[^\d]/', '', $q);
+
 $stmt = $pdo->prepare("
-    SELECT id, username, last_seen
-    FROM users
-    WHERE id != ?
-    AND (username LIKE ? OR email LIKE ?)
-    ORDER BY username LIMIT 10
-    ");
-$stmt->execute([$user_id, "%$search%", "%$search%"]);
+    SELECT u.id, u.username, u.phone, 
+           IF(u.last_seen > DATE_SUB(NOW(), INTERVAL 5 MINUTE), 1, 0) as online
+    FROM users u
+    WHERE u.id != ?
+      AND (
+          u.username LIKE ? 
+          OR u.phone LIKE ?
+      )
+    ORDER BY u.username
+    LIMIT 10
+");
+
+$searchTerm = "%$q%";
+$phoneTerm = "%$phone_query%";
+
+$stmt->execute([$current_user_id, $searchTerm, $phoneTerm]);
 $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Добавим online статус
-foreach ($users as &$user) {
-    $lastSeen = new DateTime($user['last_seen']);
-    $now = new DateTime();
-    $diff = $now->getTimestamp() - $lastSeen->getTimestamp();
-    $user['online'] = $diff < 60;
-}
 echo json_encode(['users' => $users]);
 ?>

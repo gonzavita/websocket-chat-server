@@ -83,5 +83,6 @@ io.on('connection', (socket) => {
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-    console.log(`🌐 WebSocket сервер запущен на порту ${PORT}`);
+    console.log(`🌐 Сервер запущен на порту ${PORT}`);
 });
+
