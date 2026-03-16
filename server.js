@@ -8,7 +8,28 @@ const mysql = require('mysql2/promise');
 
 const app = express();
 
-// ВАЖНО: разрешить CORS с вашего сайта
+// Подключение к базе
+const db = mysql.createPool({
+    host: process.env.DB_HOST || 'mysql81.hostland.ru',
+    user: process.env.DB_USER || 'host1874179_mess',
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME || 'host1874179_mess',
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0
+});
+
+// Проверка подключения
+db.getConnection()
+    .then(connection => {
+        console.log('✅ Подключение к MySQL успешно');
+        connection.release();
+    })
+    .catch(err => {
+        console.error('🔴 Ошибка подключения к MySQL:', err.message);
+    });
+
+// Настройки CORS
 app.use(cors({
     origin: "https://service-taxi31.ru",
     methods: ["GET", "POST"],
@@ -23,9 +44,7 @@ const io = socketIo(server, {
         methods: ["GET", "POST"],
         credentials: true
     },
-    // 🔥 Ключевые настройки для работы за прокси (Render, Heroku и др.)
-    transports: ['polling', 'websocket'], // явно указываем
-    allowEIO3: false,
+    transports: ['polling', 'websocket'],
     cookie: false
 });
 
@@ -43,33 +62,45 @@ io.on('connection', (socket) => {
 
     socket.on('send_message', async (data) => {
         const userInfo = socketUsers.get(socket);
-        if (!userInfo) return socket.emit('error', { message: 'Not authorized' });
+        if (!userInfo) {
+            console.log('🔴 Не авторизован');
+            return socket.emit('error', { message: 'Not authorized' });
+        }
 
         const { message_text } = data;
         const { user_id, chat_id } = userInfo;
 
+        if (!message_text || typeof message_text !== 'string') {
+            console.log('🔴 Пустое сообщение:', message_text);
+            return socket.emit('error', { message: 'Invalid message' });
+        }
+
         try {
+            console.log('✅ Вставляем в БД:', { chat_id, user_id, message_text });
+
+            // 🔥 ИСПРАВЛЕНО: используем db, который выше
             const [result] = await db.execute(
                 "INSERT INTO messages (chat_id, sender_id, content) VALUES (?, ?, ?)",
                 [chat_id, user_id, message_text]
             );
 
-            const messageId = result.insertId;
+            console.log('✅ Сообщение добавлено, ID:', result.insertId);
 
             const [rows] = await db.execute("SELECT username FROM users WHERE id = ?", [user_id]);
             const username = rows[0]?.username || 'Аноним';
 
             io.to(`chat_${chat_id}`).emit('new_message', {
-                id: messageId,
+                id: result.insertId,
                 chat_id,
                 sender_id: user_id,
                 content: message_text,
                 sent_at: new Date().toISOString(),
                 username
             });
+
         } catch (err) {
-            console.error('🔴 Ошибка БД:', err);
-            socket.emit('error', { message: 'Не удалось отправить сообщение' });
+            console.error('🔴 Ошибка БД:', err.message);
+            socket.emit('error', { message: 'DB error: ' + err.message });
         }
     });
 
@@ -84,7 +115,7 @@ io.on('connection', (socket) => {
     });
 });
 
-// ✅ Порт из переменной окружения + 0.0.0.0
+// Порт из переменной окружения
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`🌐 Сервер запущен на порту ${PORT}`);

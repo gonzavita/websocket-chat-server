@@ -5,10 +5,9 @@ let currentChatId = null;
 export function connectToChat(chatId, userId) {
     if (socket) disconnect();
 
-    // 🔥 ПРАВИЛЬНЫЙ URL
     socket = io('https://websocket-chat-server-lm97.onrender.com', {
         query: { user_id: userId },
-        transports: ['polling', 'websocket'] // ⬅️ обязательно
+        transports: ['polling', 'websocket']
     });
 
     currentChatId = chatId;
@@ -20,6 +19,11 @@ export function connectToChat(chatId, userId) {
         console.log('📩 Получено:', msg);
         if (msg.chat_id == currentChatId) {
             window.addMessageLocally(msg);
+
+            // Если это НЕ моё сообщение — помечаем как прочитанное
+            if (msg.sender_id != window.currentUser.id) {
+                markAsRead(msg.id, window.currentUser.id);
+            }
         }
     });
 
@@ -34,6 +38,7 @@ export function connectToChat(chatId, userId) {
 
 export function sendMessage(text) {
     if (!socket || !currentChatId) return;
+    console.log('📤 Отправляю:', text);
     socket.emit('send_message', { message_text: text });
 }
 

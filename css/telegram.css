@@ -397,7 +397,27 @@ body {
     z-index: 99;
     display: none;
 }
+/* Галочки прочтения */
+.checks {
+    display: inline-flex;
+    margin-left: 5px;
+    font-size: 0.8em;
+    color: #999;
+    gap: 1px;
+}
 
+.checks .check {
+    opacity: 0.7;
+}
+
+.checks.sent[data-status="delivered"] .check,
+.checks.sent[data-status="read"] .check {
+    color: #0b93f6;
+}
+
+.checks.sent[data-status="read"] .check {
+    color: #008000;
+}
 .overlay-left.active,
 .overlay-right.active {
     display: block;
