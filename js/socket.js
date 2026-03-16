@@ -1,4 +1,6 @@
 // js/socket.js
+import { markAsRead } from './messages.js'; // ✅ Добавьте эту строку
+
 let socket = null;
 let currentChatId = null;
 
@@ -20,7 +22,7 @@ export function connectToChat(chatId, userId) {
         if (msg.chat_id == currentChatId) {
             window.addMessageLocally(msg);
 
-            // Если это НЕ моё сообщение — помечаем как прочитанное
+            // ✅ Теперь markAsRead доступна
             if (msg.sender_id != window.currentUser.id) {
                 markAsRead(msg.id, window.currentUser.id);
             }

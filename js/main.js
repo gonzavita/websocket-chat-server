@@ -20,8 +20,6 @@ window.sendMessage = async function(text, chatId, userId) {
 };
 
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('DOM загружен — старт');
-
     // === Элементы интерфейса ===
     const authScreen = document.getElementById('authScreen');
     const chatApp = document.getElementById('chatApp');
@@ -48,6 +46,7 @@ document.addEventListener('DOMContentLoaded', () => {
         authScreen.style.display = 'none';
         chatApp.style.display = 'flex';
         window.loadChats();
+        startStatusUpdateViaSocket(); // ✅ Запускаем через сокет
     }
 
     // === Переключение между формами ===
@@ -83,6 +82,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 authScreen.style.display = 'none';
                 chatApp.style.display = 'flex';
                 window.loadChats();
+                startStatusUpdateViaSocket(); // ✅
             } else {
                 alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
             }
@@ -107,6 +107,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // === Переключение темы ===
     themeToggle?.addEventListener('change', () => {
         document.body.classList.toggle('dark', themeToggle.checked);
+        localStorage.setItem('darkMode', themeToggle.checked);
     });
 
     // Восстановление сохранённой темы
@@ -156,9 +157,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const text = messageInput.value.trim();
         if (!text || !window.currentChatId || !window.currentUser) return;
 
-        const success = await window.sendMessage(text, window.currentChatId, window.currentUser.id);
-        if (success) {
-            messageInput.value = '';
+        messageInput.value = ''; // очищаем сразу
+
+        try {
+            await window.sendMessage(text, window.currentChatId, window.currentUser.id);
+        } catch (err) {
+            console.error('Не удалось отправить:', err);
+            alert('Сообщение не отправлено. Проверьте соединение.');
+            messageInput.value = text;
         }
     });
 
@@ -168,6 +174,26 @@ document.addEventListener('DOMContentLoaded', () => {
             sendBtn?.click();
         }
     });
-
-    console.log('✅ main.js инициализирован');
 });
+
+/**
+ * Запускает обновление статуса через WebSocket
+ */
+function startStatusUpdateViaSocket() {
+    if (window.statusInterval) {
+        clearInterval(window.statusInterval);
+    }
+
+    // Ждём, пока сокет подключится
+    const interval = setInterval(() => {
+        if (window.socket && window.currentUser) {
+            clearInterval(interval);
+            console.log('✅ Начинаем отправлять user_active');
+
+            // Отправляем каждые 30 сек
+            window.statusInterval = setInterval(() => {
+                window.socket.emit('user_active');
+            }, 30000);
+        }
+    }, 500);
+}

@@ -1,122 +1,99 @@
-// server.js
-require('dotenv').config();
 const express = require('express');
-const http = require('http');
-const socketIo = require('socket.io');
-const cors = require('cors');
-const mysql = require('mysql2/promise');
+const { createServer } = require('http');
+const { Server } = require('socket.io');
+const fetch = require('node-fetch');
 
 const app = express();
-
-// Подключение к базе
-const db = mysql.createPool({
-    host: process.env.DB_HOST || 'mysql81.hostland.ru',
-    user: process.env.DB_USER || 'host1874179_mess',
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME || 'host1874179_mess',
-    waitForConnections: true,
-    connectionLimit: 10,
-    queueLimit: 0
-});
-
-// Проверка подключения
-db.getConnection()
-    .then(connection => {
-        console.log('✅ Подключение к MySQL успешно');
-        connection.release();
-    })
-    .catch(err => {
-        console.error('🔴 Ошибка подключения к MySQL:', err.message);
-    });
-
-// Настройки CORS
-app.use(cors({
-    origin: "https://service-taxi31.ru",
-    methods: ["GET", "POST"],
-    credentials: true
-}));
-
-const server = http.createServer(app);
-
-const io = socketIo(server, {
+const httpServer = createServer(app);
+const io = new Server(httpServer, {
     cors: {
         origin: "https://service-taxi31.ru",
         methods: ["GET", "POST"],
         credentials: true
-    },
-    transports: ['polling', 'websocket'],
-    cookie: false
+    }
 });
 
-// Храним: socket → { user_id, chat_id }
-const socketUsers = new Map();
+// Храним подключённых пользователей
+const connectedUsers = new Set(); // user_id
+const userSockets = new Map();     // user_id → socket.id
+
+// Middleware: логируем подключение
+io.use((socket, next) => {
+    const userId = socket.handshake.query.user_id;
+    if (!userId) {
+        console.warn('❌ Подключение без user_id');
+        return next(new Error('User ID required'));
+    }
+    socket.userId = userId;
+    next();
+});
 
 io.on('connection', (socket) => {
-    console.log('🟢 Пользователь подключён:', socket.id);
+    const userId = socket.userId;
 
-    socket.on('join', async ({ user_id, chat_id }) => {
-        socket.join(`chat_${chat_id}`);
-        socketUsers.set(socket, { user_id, chat_id });
-        console.log(`User ${user_id} joined chat_${chat_id}`);
-    });
+    console.log(`🟢 Пользователь ${userId} подключился`);
 
-    socket.on('send_message', async (data) => {
-        const userInfo = socketUsers.get(socket);
-        if (!userInfo) {
-            console.log('🔴 Не авторизован');
-            return socket.emit('error', { message: 'Not authorized' });
-        }
+    // Добавляем в онлайн
+    connectedUsers.add(userId);
+    userSockets.set(userId, socket.id);
 
-        const { message_text } = data;
-        const { user_id, chat_id } = userInfo;
+    // Уведомляем всех об обновлении онлайн-списка (опционально)
+    io.emit('online_update', { online: Array.from(connectedUsers) });
 
-        if (!message_text || typeof message_text !== 'string') {
-            console.log('🔴 Пустое сообщение:', message_text);
-            return socket.emit('error', { message: 'Invalid message' });
-        }
-
+    // Когда клиент сообщает, что он активен
+    socket.on('user_active', async () => {
         try {
-            console.log('✅ Вставляем в БД:', { chat_id, user_id, message_text });
-
-            // 🔥 ИСПРАВЛЕНО: используем db, который выше
-            const [result] = await db.execute(
-                "INSERT INTO messages (chat_id, sender_id, content) VALUES (?, ?, ?)",
-                [chat_id, user_id, message_text]
-            );
-
-            console.log('✅ Сообщение добавлено, ID:', result.insertId);
-
-            const [rows] = await db.execute("SELECT username FROM users WHERE id = ?", [user_id]);
-            const username = rows[0]?.username || 'Аноним';
-
-            io.to(`chat_${chat_id}`).emit('new_message', {
-                id: result.insertId,
-                chat_id,
-                sender_id: user_id,
-                content: message_text,
-                sent_at: new Date().toISOString(),
-                username
+            await fetch('https://service-taxi31.ru/api/update_status.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: userId })
             });
-
+            console.log(`⏱️  Обновлён last_seen для пользователя ${userId}`);
         } catch (err) {
-            console.error('🔴 Ошибка БД:', err.message);
-            socket.emit('error', { message: 'DB error: ' + err.message });
+            console.warn(`⚠️ Не удалось обновить статус для ${userId}:`, err.message);
         }
     });
 
+    // Приход нового сообщения
+    socket.on('send_message', async (data) => {
+        const { message_text: content } = data;
+        const chatId = socket.handshake.query.chat_id;
+
+        if (!content || !chatId) return;
+
+        // Отправляем сообщение всем в чате
+        io.to(`chat_${chatId}`).emit('new_message', {
+            id: Date.now(), // временный ID, лучше генерировать на бэкенде
+            chat_id: chatId,
+            sender_id: userId,
+            content: content,
+            sent_at: new Date().toISOString(),
+            username: data.username || 'User'
+        });
+    });
+
+    // Присоединение к чату
+    socket.on('join', (data) => {
+        const { chat_id } = data;
+        socket.join(`chat_${chat_id}`);
+        console.log(`👤 ${userId} присоединился к чату ${chat_id}`);
+    });
+
+    // Отключение
     socket.on('disconnect', () => {
-        const userInfo = socketUsers.get(socket);
-        if (userInfo) {
-            const { user_id, chat_id } = userInfo;
-            socket.to(`chat_${chat_id}`).emit('user_left', { user_id });
-        }
-        socketUsers.delete(socket);
-        console.log('🔴 Пользователь отключён:', socket.id);
+        console.log(`🔴 Пользователь ${userId} отключился`);
+        connectedUsers.delete(userId);
+        userSockets.delete(userId);
+        io.emit('online_update', { online: Array.from(connectedUsers) });
     });
 });
 
-// Порт из переменной окружения
-const PORT = process.env.PORT || 3001;
-server.listen(PORT, '0.0.0.0', () => {
-    console.log(`🌐 Сервер запущен на порту ${PORT}`);
+// Эндпоинт: кто онлайн (GET /api/online)
+app.get('/api/online', (req, res) => {
+    res.json({ online: Array.from(connectedUsers) });
+});
+
+const PORT = process.env.PORT || 3000;
+httpServer.listen(PORT, () => {
+    console.log(`🚀 Сервер запущен на порту ${PORT}`);
 });

@@ -414,7 +414,18 @@ body {
 .checks.sent[data-status="read"] .check {
     color: #0b93f6;
 }
+/* Онлайн-статус в списке чатов */
+.chat-item small.chat-status {
+    font-size: 0.9em;
+    margin-left: 6px;
+}
 
+/* Статус в заголовке чата */
+#interlocutorStatus {
+    font-size: 0.85em;
+    color: #0b93f6;
+    margin-left: 8px;
+}
 .checks.sent[data-status="read"] .check {
     color: #008000;
 }
