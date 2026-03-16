@@ -50,7 +50,7 @@ io.on('connection', (socket) => {
 
         try {
             const [result] = await db.execute(
-                "INSERT INTO messages (chat_id, sender_id, content, sent_at) VALUES (?, ?, ?, NOW())",
+                "INSERT INTO messages (chat_id, sender_id, content) VALUES (?, ?, ?)",
                 [chat_id, user_id, message_text]
             );
 

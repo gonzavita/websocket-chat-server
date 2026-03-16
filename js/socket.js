@@ -2,53 +2,41 @@
 let socket = null;
 let currentChatId = null;
 
-/**
- * Подключиться к чату
- */
 export function connectToChat(chatId, userId) {
     if (socket) disconnect();
 
-    // Подключаемся к серверу
-    socket = io('https://websocket-chat-server.onrender.com', {
-        query: { user_id: userId }
+    // 🔥 ПРАВИЛЬНЫЙ URL
+    socket = io('https://websocket-chat-server-lm97.onrender.com', {
+        query: { user_id: userId },
+        transports: ['polling', 'websocket'] // ⬅️ обязательно
     });
 
     currentChatId = chatId;
 
-    // Присоединяемся к комнате чата
     socket.emit('join', { user_id: userId, chat_id: chatId });
-
     console.log(`Подключились к чату ${chatId}`);
 
-    // Слушаем новые сообщения
     socket.on('new_message', (msg) => {
-        console.log('📩 Получено сообщение:', msg);
-
-        // Только если это текущий чат
+        console.log('📩 Получено:', msg);
         if (msg.chat_id == currentChatId) {
             window.addMessageLocally(msg);
         }
     });
 
-    socket.on('error', (err) => {
-        console.error('Ошибка сокета:', err);
+    socket.on('connect_error', (err) => {
+        console.error('🔴 Ошибка подключения:', err.message);
+    });
+
+    socket.on('connect', () => {
+        console.log('✅ Успешно подключились к серверу!');
     });
 }
 
-/**
- * Отправить сообщение
- */
 export function sendMessage(text) {
     if (!socket || !currentChatId) return;
-
-    socket.emit('send_message', {
-        message_text: text
-    });
+    socket.emit('send_message', { message_text: text });
 }
 
-/**
- * Отключиться
- */
 export function disconnect() {
     if (socket) {
         socket.disconnect();
