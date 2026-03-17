@@ -1,23 +1,34 @@
 // js/socket.js
-import { updateMessageStatus, markAsRead, setConnectionStatus } from './ui.js'; // ✅ импортировано
+import { addMessageIfNotExists, updateMessageStatus, markAsRead, setConnectionStatus } from './ui.js';
 
 let connectingToChatId = null;
 
 export function connectToChat(chatId, userId) {
-    if (connectingToChatId === chatId || window.currentChatId === chatId) {
+    // ✅ Уже подключены к этому чату — выходим
+    if (window.currentChatId === chatId && window.socket?.connected) {
+        console.log('🟢 Уже подключены к чату', chatId);
+        return;
+    }
+
+    // ✅ Уже подключаемся — выходим
+    if (connectingToChatId === chatId) {
+        console.log('🚫 Уже подключаемся к чату', chatId);
         return;
     }
 
     connectingToChatId = chatId;
 
+    // Отключаем предыдущее соединение
     if (window.socket) {
-        window.socket.off('new_message');
-        window.socket.off('message_delivered');
         window.socket.off('connect');
         window.socket.off('connect_error');
+        window.socket.off('new_message');
+        window.socket.off('message_delivered');
         window.socket.disconnect();
+        console.log('⚠️ Отключили предыдущее соединение');
     }
 
+    console.log('🌐 Создаём новое соединение...');
     window.socket = io('https://websocket-chat-server-lm97.onrender.com', {
         query: { user_id: userId, chat_id: chatId },
         auth: { user_id: userId, chat_id: chatId },
@@ -25,15 +36,15 @@ export function connectToChat(chatId, userId) {
     });
 
     window.socket.on('connect', () => {
+        console.log('🟢 Соединение установлено:', window.socket.id);
         window.currentChatId = chatId;
         connectingToChatId = null;
-        console.log('[socket] Подключено, присоединяемся к чату:', chatId);
         window.socket.emit('join', { chat_id: chatId });
         setConnectionStatus('онлайн');
     });
 
     window.socket.on('connect_error', (err) => {
-        console.warn('Socket error:', err.message);
+        console.error('🔴 Ошибка подключения:', err);
         connectingToChatId = null;
         setConnectionStatus('оффлайн');
     });
@@ -42,9 +53,9 @@ export function connectToChat(chatId, userId) {
         if (!msg.id || !msg.content || !msg.sender_id || !msg.sent_at) return;
 
         if (msg.chat_id == window.currentChatId) {
+            // ✅ Используем централизованную функцию
             const isMine = String(msg.sender_id) === String(window.currentUser.id);
-
-            window.giga_addMessage(
+            addMessageIfNotExists(
                 msg.content,
                 isMine,
                 new Date(msg.sent_at),
@@ -70,7 +81,7 @@ export function sendMessage(text) {
     }
 
     const tempId = 'temp_' + Date.now();
-    window.giga_addMessage(text, true, new Date(), 'sent', tempId);
+    addMessageIfNotExists(text, true, new Date(), 'sent', tempId);
 
     console.log('[socket] Отправка:', { text, chatId: window.currentChatId });
 

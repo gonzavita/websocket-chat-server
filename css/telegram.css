@@ -8,7 +8,7 @@
     --border: #e1e1e6;
     --sent-bg: #3f5f1045;
     /* Зелёный фон исходящих */
-    --sent-text: white;
+    --sent-text: #1c1c1e;
     --received-bg: white;
     --received-border: #e5e5ea;
     --shadow: 0 1px 3px rgba(0, 0, 0, 0.1);

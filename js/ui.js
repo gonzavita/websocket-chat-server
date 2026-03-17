@@ -28,9 +28,24 @@ export function updateMessageStatus(messageId, status) {
 }
 
 /**
+ * Централизованная функция добавления сообщения (избегаем дублей)
+ */
+export function addMessageIfNotExists(content, isMine, time, status, id) {
+    // Проверяем, существует ли уже сообщение
+    if (document.querySelector(`[data-mid="${id}"]`)) {
+        console.log('💬 Сообщение уже есть, пропускаем:', id);
+        return;
+    }
+    if (window.giga_addMessage) {
+        window.giga_addMessage(content, isMine, time, status, id);
+    }
+}
+
+/**
  * Открывает чат по ID
  */
 export async function openChat(chatId, initialName = 'Чат') {
+    console.log('🔧 [ui] Открываем чат:', chatId);
     currentChatId = chatId;
     window.currentChatId = chatId;
 
@@ -38,6 +53,7 @@ export async function openChat(chatId, initialName = 'Чат') {
     const messages = document.getElementById('messages');
     if (messages) messages.innerHTML = '';
 
+    // Подключаемся к сокету (только если нужно)
     connectToChat(chatId, window.currentUser.id);
 
     try {
@@ -49,9 +65,13 @@ export async function openChat(chatId, initialName = 'Чат') {
         if (result.messages && Array.isArray(result.messages)) {
             result.messages.forEach(msg => {
                 const isSent = String(msg.sender_id) === String(window.currentUser.id);
-                if (window.giga_addMessage) {
-                    window.giga_addMessage(msg.content, isSent, new Date(msg.created_at), 'delivered', msg.id);
-                }
+                addMessageIfNotExists(
+                    msg.content,
+                    isSent,
+                    new Date(msg.created_at),
+                    'delivered',
+                    msg.id
+                );
             });
 
             const sentIds = result.messages
@@ -138,7 +158,7 @@ async function getReadStatus(chatId, messageIds) {
 export async function markAsRead(messageId, userId) {
     if (!messageId || !userId) return;
     try {
-        await fetch('https://service-taxi31.ru/api/messages.php?action=read', {
+        await fetch('https://websocket-chat-server-lm97.onrender.com/api/messages?chat_id=...', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ message_id: messageId, user_id: userId })
