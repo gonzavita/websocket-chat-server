@@ -2,6 +2,8 @@ const express = require('express');
 const { createServer } = require('http');
 const { Server } = require('socket.io');
 const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
+const { v4: uuidv4 } = require('uuid'); // ✅ Перенесли наверх
+
 
 
 const app = express();
@@ -59,8 +61,6 @@ io.on('connection', (socket) => {
     socket.on('send_message', async (data) => {
         const { message_text: content } = data;
         const chatId = socket.handshake.query.chat_id;
-        const { v4: uuidv4 } = require('uuid');
-
 
         if (!content || !chatId) return;
 
