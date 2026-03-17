@@ -1,0 +1,69 @@
+export async function openChat(chatId, initialName = 'Чат') {
+currentChatId = chatId;
+window.currentChatId = chatId;
+
+const header = document.getElementById('chatHeader');
+const messages = document.getElementById('messages');
+if (messages) messages.innerHTML = '';
+
+connectToChat(chatId, window.currentUser.id);
+await loadMessagesHistory(chatId);
+
+try {
+const res = await fetch(`https://service-taxi31.ru/api/chat_participants.php?chat_id=${chatId}`);
+const data = await res.json();
+if (data.success && Array.isArray(data.users)) {
+const interlocutor = data.users.find(u => u.id !== window.currentUser.id);
+if (interlocutor) {
+if (header) header.textContent = interlocutor.username;
+const avatar = document.getElementById('currentAvatar');
+if (avatar) avatar.textContent = interlocutor.username.charAt(0).toUpperCase();
+
+updateInterlocutorStatus(interlocutor.id);
+} else if (header) {
+header.textContent = initialName;
+}
+}
+} catch (err) {
+console.error('Ошибка участников:', err);
+if (header) header.textContent = initialName;
+}
+
+setTimeout(() => markAllReceivedAsRead(chatId), 500);
+
+messages?.addEventListener('scroll', () => {
+if (messages.scrollTop + messages.clientHeight >= messages.scrollHeight - 10) {
+markAllReceivedAsRead(chatId);
+}
+});
+}
+
+
+async function markAllReceivedAsRead(chatId) {
+try {
+const res = await fetch(
+`https://service-taxi31.ru/api/messages.php?action=get&chat_id=${chatId}&last_id=0&limit=100`
+);
+let data;
+try {
+const text = await res.text();
+if (!text.trim()) {
+console.error('Пустой ответ от сервера');
+return;
+}
+data = JSON.parse(text);
+} catch (err) {
+console.error('JSON error:', err, 'Response:', text);
+return;
+}
+
+if (data.messages && Array.isArray(data.messages)) {
+const received = data.messages.filter(m => m.sender_id != window.currentUser.id);
+for (const msg of received) {
+await markAsRead(msg.id, window.currentUser.id);
+}
+}
+} catch (err) {
+console.warn('Не удалось отметить прочитанные:', err);
+}
+}

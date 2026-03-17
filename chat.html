@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>💬 Messenger</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="css/telegram.css" />
+</head>
+
+<body>
+    <!-- === Основной интерфейс === -->
+    <div class="app" id="chatApp" style="display: none;">
+        <!-- Левая панель: чаты -->
+        <aside class="sidebar" id="sidebar">
+            <header class="sidebar-header">
+                <button class="menu-toggle" id="menuToggle">☰</button>
+                <h3>Чаты</h3>
+                <span id="logout" class="logout-btn">Выход</span>
+            </header>
+
+            <div class="search-box">
+                <input type="text" id="searchUsers" placeholder="Поиск..." />
+            </div>
+
+            <!-- Результаты поиска -->
+            <div class="search-results" id="searchResults"></div>
+
+            <!-- Список чатов -->
+            <div class="chats-list" id="chatsList"></div>
+        </aside>
+
+        <!-- Центр: чат -->
+        <main class="chat-main">
+            <header class="chat-header">
+                <div class="avatar" id="currentAvatar">A</div>
+                <span id="chatHeader">Выберите чат</span>
+            </header>
+
+            <div class="messages" id="messages"></div>
+
+            <div class="input-area">
+                <input type="text" id="messageInput" placeholder="Сообщение..." />
+                <button id="sendBtn">➤</button>
+            </div>
+        </main>
+
+        <!-- Правая панель: профиль -->
+        <aside class="profile-panel" id="profilePanel">
+            <header class="profile-header">
+                <button class="close-btn" id="closeProfile">×</button>
+                <div class="avatar">👤</div>
+                <h3 id="profileName">Профиль</h3>
+            </header>
+
+            <div class="profile-body">
+                <section class="profile-section">
+                    <h4>Аккаунт</h4>
+                    <div class="profile-row"><strong>Имя:</strong> <span id="profileFullName">Пользователь</span></div>
+                    <div class="profile-row"><strong>Email:</strong> <span id="profileEmail">—</span></div>
+                    <div class="profile-row"><strong>Телефон:</strong> <span id="profilePhone">—</span></div>
+                </section>
+
+                <section class="profile-section">
+                    <h4>Настройки</h4>
+                    <label class="toggle-row">
+                        Тёмная тема
+                        <input type="checkbox" id="themeToggle" />
+                        <span class="toggle-slider"></span>
+                    </label>
+                </section>
+
+                <button class="btn-danger" id="logoutFromProfile">Выйти из аккаунта</button>
+            </div>
+        </aside>
+    </div>
+
+    <!-- Overlay -->
+    <div class="overlay-left" id="overlayLeft"></div>
+    <div class="overlay-right" id="overlayRight"></div>
+
+
+    <!-- Подключение Socket.IO -->
+    <script src="/js/socket.io.min.js"></script>
+
+    <!-- Глобальные переменные -->
+    <script>
+        window.currentUser = null;
+        window.currentChatId = null;
+        window.socket = null;
+
+        if (localStorage.getItem('currentUser')) {
+            try {
+                window.currentUser = JSON.parse(localStorage.getItem('currentUser'));
+            } catch (e) {
+                localStorage.removeItem('currentUser');
+                window.location.href = 'index.html';
+            }
+        } else {
+            window.location.href = 'index.html';
+        }
+    </script>
+
+<!-- Подключение глобальных функций -->
+<script src="/js/globals.js"></script>
+    <!-- Все модули через main.js -->
+<script type="module" src="/js/main.js"></script>
+
+</body>
+
+</html>

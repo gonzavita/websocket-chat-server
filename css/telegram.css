@@ -1,4 +1,4 @@
-/* === Telegram-стиль (обновлённая версия) === */
+/* === Telegram-стиль (официальный вид) === */
 :root {
     --bg: #f9f9fb;
     --card: #ffffff;
@@ -6,8 +6,11 @@
     --text-secondary: #636366;
     --primary: #0088cc;
     --border: #e1e1e6;
-    --sent: #0088cc;
-    --received: #e5e5ea;
+    --sent-bg: #3f5f1045;
+    /* Зелёный фон исходящих */
+    --sent-text: white;
+    --received-bg: white;
+    --received-border: #e5e5ea;
     --shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
     --gap-sm: 8px;
     --gap-md: 12px;
@@ -20,8 +23,11 @@ body.dark {
     --text: #ffffff;
     --text-secondary: #b0b0b0;
     --border: #3a3a3c;
-    --sent: #0b5cb7;
-    --received: #3a3a3c;
+    --sent-bg: #0b93f6;
+    /* Синий в тёмной теме */
+    --sent-text: white;
+    --received-bg: #3a3a3c;
+    --received-border: #4a4a4c;
 }
 
 * {
@@ -172,7 +178,6 @@ body {
     display: flex;
     flex-direction: column;
     background: #efeef1;
-    /* Серый фон как в Telegram */
 }
 
 .chat-header {
@@ -187,60 +192,62 @@ body {
     z-index: 10;
 }
 
-.messages {
-    flex: 1;
-    padding: var(--gap-lg);
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: var(--gap-sm);
-    background: #f0f0f5;
-}
-
-/* === Сообщения === */
-.message-container {
-    display: flex;
-    gap: 8px;
-    align-items: flex-end;
-    max-width: 80%;
-    margin-bottom: 8px;
-}
-
-.message-container.sent {
-    flex-direction: row-reverse;
-    align-self: flex-end;
-}
-
-.message-container.received {
-    align-self: flex-start;
-}
-
-.message-container .avatar {
-    width: 32px;
-    height: 32px;
+.avatar {
+    width: 40px;
+    height: 40px;
     border-radius: 50%;
     background: var(--primary);
     color: white;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 14px;
-    flex-shrink: 0;
-    opacity: 0;
-    transition: opacity 0.2s;
+    font-weight: 600;
+    font-size: 16px;
 }
 
-.message-container.received .avatar {
-    opacity: 1;
+#chatHeader {
+    font-size: 16px;
+    font-weight: 500;
 }
 
-.message {
-    padding: 10px 14px;
-    border-radius: 16px;
-    line-height: 1.5;
+#interlocutorStatus {
+    font-size: 0.85em;
+    color: var(--text-secondary);
+}
+
+/* === Сообщения === */
+.messages {
+    flex: 1;
+    padding: 16px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    background: #f0f0f5;
+}
+
+.bubbles-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.bubbles-group.align-end {
+    align-items: flex-end;
+}
+
+.bubbles-group.align-start {
+    align-items: flex-start;
+}
+
+.bubble {
+    max-width: 80%;
+    padding: 8px 12px;
+    border-radius: 18px;
     font-size: 14px;
+    line-height: 1.4;
     word-wrap: break-word;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+    position: relative;
     animation: fadeIn 0.2s ease-out;
 }
 
@@ -256,73 +263,70 @@ body {
     }
 }
 
-/* Пузырьки */
-.sent {
-    background: var(--sent);
-    color: white;
-    border-bottom-left-radius: 4px;
-}
-
-.received {
-    background: var(--received);
-    color: var(--text);
+/* Исходящее сообщение */
+.bubble.is-out {
+    background-color: var(--sent-bg);
+    color: var(--sent-text);
+    align-self: flex-end;
     border-bottom-right-radius: 4px;
 }
 
-/* Улучшенный стиль для входящих сообщений */
-.received a {
-    color: #0088cc;
-    text-decoration: none;
+.bubble.is-out .message {
+    color: inherit;
 }
 
-.received a:hover {
-    text-decoration: underline;
+/* Входящее сообщение */
+.bubble.is-in {
+    background-color: var(--received-bg);
+    color: var(--text);
+    align-self: flex-start;
+    border: 1px solid var(--received-border);
+    border-bottom-left-radius: 4px;
 }
 
-/* Время под сообщением */
-.message-time {
-    font-size: 10px;
-    margin-top: 4px;
+/* Контент внутри пузыря */
+.bubble-content-wrapper {
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+}
+
+.message {
+    flex: 1;
+    word-break: break-word;
+}
+
+.time {
+    font-size: 11px;
+    opacity: 0.7;
+    white-space: nowrap;
     display: flex;
     align-items: center;
     gap: 2px;
 }
 
-.sent .message-time {
-    color: rgba(255, 255, 255, 0.8);
+/* Подсказка времени при наведении */
+.time-inner {
+    display: none;
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #333;
+    color: white;
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 12px;
+    white-space: nowrap;
+    z-index: 10;
+    pointer-events: none;
 }
 
-.received .message-time {
-    color: var(--text-secondary);
+.time:hover .time-inner {
+    display: block;
 }
 
-/* Галочки как в Telegram */
-.checks {
-    display: inline-flex;
-    gap: 1px;
-    font-size: 14px;
-    margin-left: 4px;
-    opacity: 0.8;
-    transition: all 0.2s ease;
-}
-
-.checks .check {
-    color: rgba(255, 255, 255, 0.8);
-    font-weight: bold;
-    line-height: 1;
-}
-
-.checks.delivered .check,
-.checks.read .check {
-    color: rgba(255, 255, 255, 0.8);
-}
-
-.checks.read .check {
-    color: #56b43c;
-    /* Зелёный как в Telegram */
-}
-
-/* === Ввод сообщения (важно!) === */
+/* === Ввод сообщения === */
 .input-area {
     padding: 12px 16px;
     display: flex;
@@ -346,6 +350,7 @@ body {
 
 .input-area input:focus {
     border-color: var(--primary);
+    box-shadow: 0 0 0 2px rgba(0, 136, 204, 0.2);
 }
 
 .input-area button {
@@ -364,10 +369,10 @@ body {
 }
 
 .input-area button:hover {
-    background: #0077b3;
+    background: #007abc;
 }
 
-/* Профиль, оверлеи и адаптив — остаются как есть */
+/* === Профиль === */
 .profile-panel {
     position: absolute;
     top: 0;
@@ -385,7 +390,109 @@ body {
     right: 0;
 }
 
-/* Overlay */
+.profile-header {
+    padding: 20px 20px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border-bottom: 1px solid var(--border);
+}
+
+.profile-header .avatar {
+    width: 56px;
+    height: 56px;
+    background: var(--primary);
+    font-size: 28px;
+}
+
+.profile-header h3 {
+    font-size: 18px;
+    font-weight: 500;
+}
+
+.close-btn {
+    background: none;
+    border: none;
+    font-size: 28px;
+    color: var(--text);
+    cursor: pointer;
+}
+
+.profile-body {
+    padding: 20px;
+}
+
+.profile-section {
+    margin-bottom: 24px;
+}
+
+.profile-section h4 {
+    font-size: 16px;
+    color: var(--text-secondary);
+    margin-bottom: 12px;
+}
+
+.profile-row {
+    font-size: 15px;
+    margin: 8px 0;
+    color: var(--text);
+}
+
+.toggle-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 0;
+    color: var(--text);
+    font-size: 15px;
+}
+
+.toggle-slider {
+    position: relative;
+    width: 44px;
+    height: 24px;
+    background: var(--border);
+    border-radius: 12px;
+    transition: background 0.2s;
+    cursor: pointer;
+}
+
+.toggle-slider::before {
+    content: '';
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 18px;
+    height: 18px;
+    background: white;
+    border-radius: 50%;
+    transition: transform 0.2s;
+}
+
+input[type="checkbox"]#themeToggle:checked+.toggle-slider {
+    background: var(--primary);
+}
+
+input[type="checkbox"]#themeToggle:checked+.toggle-slider::before {
+    transform: translateX(20px);
+}
+
+.btn-danger {
+    width: 100%;
+    padding: 12px;
+    background: #e74c3c;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 15px;
+    cursor: pointer;
+}
+
+.btn-danger:hover {
+    background: #c0392b;
+}
+
+/* === Overlay === */
 .overlay-left,
 .overlay-right {
     position: fixed;
@@ -397,44 +504,13 @@ body {
     z-index: 99;
     display: none;
 }
-/* Галочки прочтения */
-.checks {
-    display: inline-flex;
-    margin-left: 5px;
-    font-size: 0.8em;
-    color: #999;
-    gap: 1px;
-}
 
-.checks .check {
-    opacity: 0.7;
-}
-
-.checks.sent[data-status="delivered"] .check,
-.checks.sent[data-status="read"] .check {
-    color: #0b93f6;
-}
-/* Онлайн-статус в списке чатов */
-.chat-item small.chat-status {
-    font-size: 0.9em;
-    margin-left: 6px;
-}
-
-/* Статус в заголовке чата */
-#interlocutorStatus {
-    font-size: 0.85em;
-    color: #0b93f6;
-    margin-left: 8px;
-}
-.checks.sent[data-status="read"] .check {
-    color: #008000;
-}
 .overlay-left.active,
 .overlay-right.active {
     display: block;
 }
 
-/* Адаптив */
+/* === Адаптив === */
 @media (max-width: 768px) {
     .app {
         flex-direction: column;
@@ -464,4 +540,76 @@ body {
         width: 100%;
         right: -100%;
     }
+}
+/* Галочки */
+.tgico {
+    font-family: 'Segoe UI Symbol', 'Arial Unicode MS', sans-serif;
+    font-size: 12px;
+    line-height: 1;
+}
+
+.bubble.is-out .time::after {
+    content: '';
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    background: white;
+    border-radius: 50%;
+    margin-left: 4px;
+    opacity: 0.7;
+}
+
+.bubble.is-out.read .time::after {
+    background: #58a5f0;
+    /* Синяя галочка — прочитано */
+}
+/* Статус сообщения */
+.bubble .status-icon {
+    display: inline-block;
+    margin-left: 4px;
+    font-size: 12px;
+    opacity: 0.7;
+    color: #a0a0a0;
+}
+
+.bubble.is-out.sent .status-icon::after {
+    content: '';
+}
+
+.bubble.is-out.delivered .status-icon::after {
+    content: '✔';
+    color: #a0a0a0;
+}
+
+.bubble.is-out.read .status-icon::after {
+    content: '✔✔';
+    color: #58a5f0;
+    /* Синий, как в Telegram */
+    font-weight: bold;
+}
+
+/* Убираем первую галочку, делаем эффект "две" */
+.bubble.is-out.read .status-icon {
+    position: relative;
+    width: 12px;
+}
+
+.bubble.is-out.read .status-icon::before {
+    content: '✔';
+    position: absolute;
+    left: 0;
+    top: 0;
+    color: #58a5f0;
+    font-weight: bold;
+    clip-path: inset(0 50% 0 0);
+}
+
+.bubble.is-out.read .status-icon::after {
+    content: '✔';
+    position: absolute;
+    left: 0;
+    top: 0;
+    color: #58a5f0;
+    font-weight: bold;
+    clip-path: inset(0 0 0 50%);
 }

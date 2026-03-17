@@ -1,24 +1,29 @@
 // js/messages.js
-import { addMessageToChat, updateMessageStatus } from './ui.js';
 
 export async function loadMessagesHistory(chatId) {
+    console.log('📥 [messages.js] Загрузка истории для чата:', chatId);
     try {
         const res = await fetch(
             `https://service-taxi31.ru/api/messages.php?action=get&chat_id=${chatId}&last_id=0&limit=100`
         );
         const result = await res.json();
+        console.log('📄 Данные:', result);
 
         if (result.messages && Array.isArray(result.messages)) {
-            result.messages.forEach(addMessageToChat);
+            result.messages.forEach(msg => {
+                const isSent = String(msg.sender_id) === String(window.currentUser.id);
+                window.giga_addMessage(msg.content, isSent, new Date(msg.created_at), 'delivered', msg.id);
+            });
 
-            const messageIds = result.messages
+            const sentIds = result.messages
                 .filter(m => m.sender_id == window.currentUser.id)
                 .map(m => m.id);
 
-            if (messageIds.length > 0) {
-                const statuses = await getReadStatus(chatId, messageIds);
-                Object.entries(statuses).forEach(([msgId, status]) => {
-                    updateMessageStatus(parseInt(msgId), status);
+            if (sentIds.length > 0) {
+                getReadStatus(chatId, sentIds).then(statuses => {
+                    Object.entries(statuses).forEach(([msgId, status]) => {
+                        window.updateMessageStatus(parseInt(msgId), status);
+                    });
                 });
             }
         }
