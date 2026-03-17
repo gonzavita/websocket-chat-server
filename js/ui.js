@@ -3,9 +3,6 @@ import { connectToChat } from './socket.js';
 
 export let currentChatId = null;
 
-/**
- * Устанавливает статус подключения
- */
 export function setConnectionStatus(status) {
     const el = document.getElementById('connection-status');
     if (el) {
@@ -14,9 +11,6 @@ export function setConnectionStatus(status) {
     }
 }
 
-/**
- * Обновляет статус сообщения: delivered → read
- */
 export function updateMessageStatus(messageId, status) {
     const bubble = document.querySelector(`[data-mid="${messageId}"]`);
     if (!bubble) return;
@@ -27,11 +21,7 @@ export function updateMessageStatus(messageId, status) {
     bubble.classList.add(status);
 }
 
-/**
- * Централизованная функция добавления сообщения (избегаем дублей)
- */
 export function addMessageIfNotExists(content, isMine, time, status, id) {
-    // Проверяем, существует ли уже сообщение
     if (document.querySelector(`[data-mid="${id}"]`)) {
         console.log('💬 Сообщение уже есть, пропускаем:', id);
         return;
@@ -41,9 +31,6 @@ export function addMessageIfNotExists(content, isMine, time, status, id) {
     }
 }
 
-/**
- * Открывает чат по ID
- */
 export async function openChat(chatId, initialName = 'Чат') {
     console.log('🔧 [ui] Открываем чат:', chatId);
     currentChatId = chatId;
@@ -53,12 +40,11 @@ export async function openChat(chatId, initialName = 'Чат') {
     const messages = document.getElementById('messages');
     if (messages) messages.innerHTML = '';
 
-    // Подключаемся к сокету (только если нужно)
     connectToChat(chatId, window.currentUser.id);
 
     try {
         const res = await fetch(
-            `https://service-taxi31.ru/api/messages.php?action=get&chat_id=${chatId}&last_id=0&limit=100`
+            `https://websocket-chat-server-lm97.onrender.com/api/messages?chat_id=${chatId}`
         );
         const result = await res.json();
 
@@ -68,7 +54,7 @@ export async function openChat(chatId, initialName = 'Чат') {
                 addMessageIfNotExists(
                     msg.content,
                     isSent,
-                    new Date(msg.created_at),
+                    new Date(msg.sent_at),
                     'delivered',
                     msg.id
                 );
@@ -91,7 +77,7 @@ export async function openChat(chatId, initialName = 'Чат') {
     }
 
     try {
-        const res = await fetch(`https://service-taxi31.ru/api/chat_participants.php?chat_id=${chatId}`);
+        const res = await fetch(`https://websocket-chat-server-lm97.onrender.com/api/chat_participants?chat_id=${chatId}`);
         const data = await res.json();
         if (data.success && Array.isArray(data.users)) {
             const interlocutor = data.users.find(u => u.id !== window.currentUser.id);
@@ -121,7 +107,7 @@ async function markAllReceivedAsRead(chatId) {
     if (!window.currentUser) return;
     try {
         const res = await fetch(
-            `https://service-taxi31.ru/api/messages.php?action=get&chat_id=${chatId}&last_id=0&limit=100`
+            `https://websocket-chat-server-lm97.onrender.com/api/messages?chat_id=${chatId}`
         );
         const data = await res.json();
         if (data.messages && Array.isArray(data.messages)) {
@@ -138,7 +124,7 @@ async function markAllReceivedAsRead(chatId) {
 async function getReadStatus(chatId, messageIds) {
     try {
         const res = await fetch(
-            `https://service-taxi31.ru/api/messages.php?action=read_status&chat_id=${chatId}&message_ids=${messageIds.join(',')}&user_id=${window.currentUser.id}`
+            `https://websocket-chat-server-lm97.onrender.com/api/messages?action=read_status&chat_id=${chatId}&message_ids=${messageIds.join(',')}&user_id=${window.currentUser.id}`
         );
         const data = await res.json();
         const readBy = data.read_by || {};
@@ -158,10 +144,10 @@ async function getReadStatus(chatId, messageIds) {
 export async function markAsRead(messageId, userId) {
     if (!messageId || !userId) return;
     try {
-        await fetch('https://websocket-chat-server-lm97.onrender.com/api/messages?chat_id=...', {
+        await fetch('https://websocket-chat-server-lm97.onrender.com/api/messages', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message_id: messageId, user_id: userId })
+            body: JSON.stringify({ action: 'read', message_id: messageId, user_id: userId })
         });
     } catch (err) {
         console.warn('Ошибка отметки прочтения:', err);

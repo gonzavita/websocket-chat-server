@@ -1,29 +1,25 @@
+// js/chats.js
 import { openChat } from './ui.js';
 
 export async function createChatWith(userId, username) {
     try {
-        const res = await fetch('https://service-taxi31.ru/api/chats.php?action=create', {
+        const res = await fetch('https://websocket-chat-server-lm97.onrender.com/api/chats', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ user_id: window.currentUser.id, interlocutor_id: userId })
         });
         const data = await res.json();
         if (data.success) {
-            loadChats(); // обновляем список чатов
+            loadChats();
             const searchResults = document.getElementById('searchResults');
             const searchInput = document.getElementById('searchUsers');
             if (searchResults) searchResults.style.display = 'none';
             if (searchInput) searchInput.value = '';
-            
-            // 🔽 Убрали alert
-            // А можно добавить тихое уведомление (см. вариант 2)
         }
     } catch (err) {
         console.error('Ошибка создания чата:', err);
     }
 }
-
-
 
 export async function loadChats() {
     if (!window.currentUser || !window.currentUser.id) {
@@ -35,7 +31,7 @@ export async function loadChats() {
     if (!chatList) return;
 
     try {
-        const res = await fetch(`https://service-taxi31.ru/api/chats.php?action=list&user_id=${window.currentUser.id}`);
+        const res = await fetch(`https://websocket-chat-server-lm97.onrender.com/api/chats?user_id=${window.currentUser.id}`);
         const data = await res.json();
 
         chatList.innerHTML = '';
@@ -66,5 +62,3 @@ export async function loadChats() {
         console.error('Ошибка загрузки чатов:', err);
     }
 }
-
-

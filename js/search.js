@@ -1,10 +1,9 @@
+// js/search.js
 import { createChatWith } from './chats.js';
 
-// Находим элементы
 const searchInput = document.getElementById('searchUsers');
-const searchResults = document.getElementById('searchResults'); // ← теперь существует
+const searchResults = document.getElementById('searchResults');
 
-// Если searchResults нет (например, на мобильном) — можно не инициализировать
 if (!searchInput) {
     console.warn('❌ #searchUsers не найден');
 } else {
@@ -22,7 +21,7 @@ if (!searchInput) {
 
         try {
             const res = await fetch(
-                `https://service-taxi31.ru/api/search_users.php?user_id=${window.currentUser.id}&q=${encodeURIComponent(q)}`
+                `https://websocket-chat-server-lm97.onrender.com/api/search_users?user_id=${window.currentUser.id}&q=${encodeURIComponent(q)}`
             );
             const data = await res.json();
 
