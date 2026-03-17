@@ -41,6 +41,13 @@ export function connectToChat(chatId, userId) {
         connectingToChatId = null;
         window.socket.emit('join', { chat_id: chatId });
         setConnectionStatus('онлайн');
+         // ✅ Добавь вот это:
+    window.socket.on('message_read', (data) => {
+        console.log('🔵 Получено прочтение:', data);
+        if (String(data.user_id) === String(window.currentUser.id)) {
+            updateMessageStatus(data.message_id, 'read');
+        }
+    });
     });
 
     window.socket.on('connect_error', (err) => {
@@ -50,24 +57,43 @@ export function connectToChat(chatId, userId) {
     });
 
     window.socket.on('new_message', (msg) => {
-        if (!msg.id || !msg.content || !msg.sender_id || !msg.sent_at) return;
+    if (!msg.id || !msg.content || !msg.sender_id || !msg.sent_at) return;
 
-        if (msg.chat_id == window.currentChatId) {
-            // ✅ Используем централизованную функцию
-            const isMine = String(msg.sender_id) === String(window.currentUser.id);
-            addMessageIfNotExists(
-                msg.content,
-                isMine,
-                new Date(msg.sent_at),
-                'delivered',
-                msg.id
-            );
+    if (msg.chat_id != window.currentChatId) return;
 
-            if (!isMine) {
-                markAsRead(msg.id, window.currentUser.id);
-            }
+    // 🔎 Проверяем, нет ли уже сообщения с таким ID
+    if (document.querySelector(`[data-mid="${msg.id}"]`)) {
+        console.log('💬 [socket] Сообщение уже есть (дубль):', msg.id);
+        return;
+    }
+
+    // 🔎 Также проверяем, не было ли временного ID (если это моё сообщение)
+    const isMine = String(msg.sender_id) === String(window.currentUser.id);
+    if (isMine) {
+        // Если это моё сообщение — возможно, уже есть с temp_id
+        const tempBubble = document.querySelector(`[data-mid^="temp_"]`);
+        if (tempBubble && tempBubble.querySelector('.message').textContent === msg.content) {
+            console.log('💬 [socket] Моё сообщение уже есть (temp), обновляем ID:', msg.id);
+            tempBubble.dataset.mid = msg.id;
+            updateMessageStatus(msg.id, 'delivered');
+            return;
         }
-    });
+    }
+
+    // ✅ Добавляем только если нет
+    addMessageIfNotExists(
+        msg.content,
+        isMine,
+        new Date(msg.sent_at),
+        'delivered',
+        msg.id
+    );
+
+    if (!isMine) {
+        markAsRead(msg.id, window.currentUser.id);
+    }
+});
+
 
     window.socket.on('message_delivered', (data) => {
         updateMessageStatus(data.message_id, 'delivered');
@@ -81,7 +107,17 @@ export function sendMessage(text) {
     }
 
     const tempId = 'temp_' + Date.now();
-    addMessageIfNotExists(text, true, new Date(), 'sent', tempId);
+    // Проверим, нет ли уже такого сообщения по тексту
+const existing = Array.from(document.querySelectorAll('[data-mid^="temp_"], [data-mid]'))
+    .find(b => b.querySelector('.message')?.textContent === text);
+
+if (existing) {
+    console.log('💬 [send] Сообщение уже есть (по тексту), пропускаем:', text);
+    return;
+}
+
+addMessageIfNotExists(text, true, new Date(), 'sent', tempId);
+
 
     console.log('[socket] Отправка:', { text, chatId: window.currentChatId });
 

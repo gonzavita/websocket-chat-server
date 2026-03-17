@@ -1,4 +1,4 @@
-// server.js — Полная версия с ручным CORS, MySQL, Socket.IO
+// server.js — Полная версия с ручным CORS, MySQL, Socket.IO + batch_read
 
 const express = require('express');
 const { createServer } = require('http');
@@ -217,7 +217,7 @@ app.get('/api/messages', async (req, res) => {
     res.json({ messages });
 });
 
-// === API: Отметить как прочитанное ===
+// === API: Отметить как прочитанное (одно сообщение) ===
 app.post('/api/messages', async (req, res) => {
     const { action, message_id, user_id } = req.body;
     if (action !== 'read') return res.status(400).json({});
@@ -234,6 +234,38 @@ app.post('/api/messages', async (req, res) => {
         res.status(500).json({ success: false });
     }
 });
+
+// ✅ === НОВОЕ: Отметить несколько сообщений как прочитанные ===
+app.post('/api/messages/batch_read', async (req, res) => {
+    const { message_ids, user_id } = req.body;
+
+    // Проверяем входные данные
+    if (!Array.isArray(message_ids) || message_ids.length === 0 || !user_id) {
+        return res.status(400).json({ success: false, error: 'Invalid input' });
+    }
+
+    try {
+        // Подготавливаем плейсхолдеры для INSERT
+        const placeholders = message_ids.map(() => '(?, ?, NOW())').join(',');
+        const values = message_ids.flatMap(id => [id, user_id]);
+
+        await db.execute(
+            `INSERT IGNORE INTO message_reads (message_id, user_id, read_at) VALUES ${placeholders}`,
+            values
+        );
+
+        // Рассылаем событие для каждого сообщения
+        message_ids.forEach(id => {
+            io.emit('message_read', { message_id: Number(id), user_id: Number(user_id) });
+        });
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error('Ошибка массового прочтения:', err);
+        res.status(500).json({ success: false, error: 'DB error' });
+    }
+});
+// ✅ Конец нового блока
 
 // === API: Участники чата ===
 app.get('/api/chat_participants', async (req, res) => {

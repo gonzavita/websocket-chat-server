@@ -111,15 +111,19 @@ async function markAllReceivedAsRead(chatId) {
         );
         const data = await res.json();
         if (data.messages && Array.isArray(data.messages)) {
-            const received = data.messages.filter(m => m.sender_id != window.currentUser.id);
-            for (const msg of received) {
-                await markAsRead(msg.id, window.currentUser.id);
+            const received = data.messages
+                .filter(m => m.sender_id != window.currentUser.id)
+                .map(m => m.id);
+
+            if (received.length > 0) {
+                markManyAsRead(received, window.currentUser.id);
             }
         }
     } catch (err) {
         console.warn('Не удалось отметить прочитанные:', err);
     }
 }
+
 
 async function getReadStatus(chatId, messageIds) {
     try {
@@ -141,15 +145,15 @@ async function getReadStatus(chatId, messageIds) {
     }
 }
 
-export async function markAsRead(messageId, userId) {
-    if (!messageId || !userId) return;
+export async function markManyAsRead(messageIds, userId) {
+    if (!Array.isArray(messageIds) || messageIds.length === 0 || !userId) return;
     try {
-        await fetch('https://websocket-chat-server-lm97.onrender.com/api/messages', {
+        await fetch('https://websocket-chat-server-lm97.onrender.com/api/messages/batch_read', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'read', message_id: messageId, user_id: userId })
+            body: JSON.stringify({ message_ids: messageIds, user_id: userId })
         });
     } catch (err) {
-        console.warn('Ошибка отметки прочтения:', err);
+        console.warn('Ошибка массового прочтения:', err);
     }
 }
