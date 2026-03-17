@@ -1,12 +1,23 @@
-// server.js — Полная версия с API + MySQL + Socket.IO
+// server.js — Полная версия с CORS, MySQL, Socket.IO и API
 
 const express = require('express');
 const { createServer } = require('http');
 const { Server } = require('socket.io');
 const mysql = require('mysql2/promise');
 const { v4: uuidv4 } = require('uuid');
+const cors = require('cors'); // Для HTTP-запросов
 
 const app = express();
+
+// ✅ Разрешаем CORS для всех HTTP-запросов
+app.use(cors({
+    origin: "https://service-taxi31.ru",
+    methods: ["GET", "POST"],
+    credentials: true
+}));
+
+app.use(express.json());
+
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
     cors: {
@@ -16,9 +27,7 @@ const io = new Server(httpServer, {
     }
 });
 
-app.use(express.json());
-
-// 🔌 Настройка MySQL
+// 🔌 Подключение к MySQL
 let db;
 (async () => {
     try {
@@ -35,7 +44,7 @@ let db;
     }
 })();
 
-// Храним online пользователей
+// Храним онлайн пользователей
 const connectedUsers = new Set();
 const userSockets = new Map();
 
@@ -56,6 +65,7 @@ io.on('connection', (socket) => {
 
     io.emit('online_update', { online: Array.from(connectedUsers) });
 
+    // Обновляем last_seen
     socket.on('user_active', async () => {
         try {
             await db.execute(`UPDATE users SET last_seen = NOW() WHERE id = ?`, [userId]);
@@ -65,6 +75,7 @@ io.on('connection', (socket) => {
         }
     });
 
+    // Отправка сообщения
     socket.on('send_message', async (data, callback) => {
         const { message_text: content } = data;
         const chatId = socket.handshake.query.chat_id;
@@ -95,11 +106,13 @@ io.on('connection', (socket) => {
         }
     });
 
+    // Присоединение к чату
     socket.on('join', ({ chat_id }) => {
         socket.join(`chat_${chat_id}`);
         console.log(`👤 ${userId} присоединился к чату ${chat_id}`);
     });
 
+    // Отключение
     socket.on('disconnect', () => {
         console.log(`🔴 Пользователь ${userId} отключился`);
         connectedUsers.delete(userId);
@@ -242,6 +255,7 @@ app.get('/api/search_users', async (req, res) => {
     res.json({ users: withOnline });
 });
 
+// Запуск сервера
 const PORT = process.env.PORT || 3000;
 httpServer.listen(PORT, () => {
     console.log(`🚀 Сервер запущен на порту ${PORT}`);
