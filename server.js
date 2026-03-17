@@ -1,20 +1,33 @@
-// server.js — Полная версия с CORS, MySQL, Socket.IO и API
+// server.js — Полная версия с ручным CORS, MySQL, Socket.IO
 
 const express = require('express');
 const { createServer } = require('http');
 const { Server } = require('socket.io');
 const mysql = require('mysql2/promise');
 const { v4: uuidv4 } = require('uuid');
-const cors = require('cors'); // Для HTTP-запросов
 
 const app = express();
 
-// ✅ Разрешаем CORS для всех HTTP-запросов
-app.use(cors({
-    origin: "https://service-taxi31.ru",
-    methods: ["GET", "POST"],
-    credentials: true
-}));
+// Отключаем стандартный cors, используем ручные заголовки
+app.use((req, res, next) => {
+    const allowedOrigin = 'https://service-taxi31.ru';
+    const origin = req.headers.origin;
+
+    if (origin === allowedOrigin) {
+        res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
+    }
+
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+
+    // Обработка preflight-запросов
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
+    }
+
+    next();
+});
 
 app.use(express.json());
 
