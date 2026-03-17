@@ -4,6 +4,17 @@ import { connectToChat } from './socket.js';
 export let currentChatId = null;
 
 /**
+ * Устанавливает статус подключения
+ */
+export function setConnectionStatus(status) {
+    const el = document.getElementById('connection-status');
+    if (el) {
+        el.textContent = status;
+        el.className = 'status-indicator ' + (status === 'онлайн' ? 'online' : 'offline');
+    }
+}
+
+/**
  * Обновляет статус сообщения: delivered → read
  */
 export function updateMessageStatus(messageId, status) {
@@ -12,18 +23,14 @@ export function updateMessageStatus(messageId, status) {
     const isSent = bubble.classList.contains('is-out');
     if (!isSent) return;
 
-    // Удаляем только предыдущий статус
     bubble.classList.remove('delivered', 'read');
-    // Добавляем новый
     bubble.classList.add(status);
-    // Класс `is-out` остаётся!
 }
 
 /**
  * Открывает чат по ID
  */
 export async function openChat(chatId, initialName = 'Чат') {
-    
     currentChatId = chatId;
     window.currentChatId = chatId;
 
@@ -42,7 +49,6 @@ export async function openChat(chatId, initialName = 'Чат') {
         if (result.messages && Array.isArray(result.messages)) {
             result.messages.forEach(msg => {
                 const isSent = String(msg.sender_id) === String(window.currentUser.id);
-                // Используем глобальную функцию из globals.js
                 if (window.giga_addMessage) {
                     window.giga_addMessage(msg.content, isSent, new Date(msg.created_at), 'delivered', msg.id);
                 }
@@ -91,9 +97,6 @@ export async function openChat(chatId, initialName = 'Чат') {
     });
 }
 
-/**
- * Отмечает все входящие сообщения как прочитанные
- */
 async function markAllReceivedAsRead(chatId) {
     if (!window.currentUser) return;
     try {
@@ -112,9 +115,6 @@ async function markAllReceivedAsRead(chatId) {
     }
 }
 
-/**
- * Запрашивает статус прочтения
- */
 async function getReadStatus(chatId, messageIds) {
     try {
         const res = await fetch(
@@ -135,11 +135,7 @@ async function getReadStatus(chatId, messageIds) {
     }
 }
 
-/**
- * Отправляет отметку "прочитано"
- */
 export async function markAsRead(messageId, userId) {
-
     if (!messageId || !userId) return;
     try {
         await fetch('https://service-taxi31.ru/api/messages.php?action=read', {

@@ -1,47 +1,47 @@
 // js/socket.js
-import { updateMessageStatus, markAsRead } from './ui.js';
+import { updateMessageStatus, markAsRead, setConnectionStatus } from './ui.js'; // ✅ импортировано
 
-let currentChatId = null;
-let socket = null;
 let connectingToChatId = null;
 
 export function connectToChat(chatId, userId) {
-    if (connectingToChatId === chatId || currentChatId === chatId) {
-        return; // Уже подключены или подключаемся
+    if (connectingToChatId === chatId || window.currentChatId === chatId) {
+        return;
     }
 
     connectingToChatId = chatId;
 
-    if (socket) {
-        socket.off('new_message');
-        socket.off('message_delivered');
-        socket.off('connect');
-        socket.off('connect_error');
-        socket.disconnect();
+    if (window.socket) {
+        window.socket.off('new_message');
+        window.socket.off('message_delivered');
+        window.socket.off('connect');
+        window.socket.off('connect_error');
+        window.socket.disconnect();
     }
 
-    socket = io('https://websocket-chat-server-lm97.onrender.com', {
+    window.socket = io('https://websocket-chat-server-lm97.onrender.com', {
         query: { user_id: userId, chat_id: chatId },
         auth: { user_id: userId, chat_id: chatId },
         transports: ['polling', 'websocket']
     });
 
-    window.socket = socket;
-
-    socket.on('connect', () => {
-        currentChatId = chatId;
+    window.socket.on('connect', () => {
+        window.currentChatId = chatId;
         connectingToChatId = null;
+        console.log('[socket] Подключено, присоединяемся к чату:', chatId);
+        window.socket.emit('join', { chat_id: chatId });
+        setConnectionStatus('онлайн');
     });
 
-    socket.on('connect_error', (err) => {
+    window.socket.on('connect_error', (err) => {
         console.warn('Socket error:', err.message);
         connectingToChatId = null;
+        setConnectionStatus('оффлайн');
     });
 
-    socket.on('new_message', (msg) => {
+    window.socket.on('new_message', (msg) => {
         if (!msg.id || !msg.content || !msg.sender_id || !msg.sent_at) return;
 
-        if (msg.chat_id == currentChatId) {
+        if (msg.chat_id == window.currentChatId) {
             const isMine = String(msg.sender_id) === String(window.currentUser.id);
 
             window.giga_addMessage(
@@ -58,65 +58,68 @@ export function connectToChat(chatId, userId) {
         }
     });
 
-    socket.on('message_delivered', (data) => {
+    window.socket.on('message_delivered', (data) => {
         updateMessageStatus(data.message_id, 'delivered');
     });
 }
 
 export function sendMessage(text) {
-    if (!socket) {
-        console.warn('[socket] Сокет не инициализирован');
-        return;
-    }
-    if (!currentChatId) {
+    if (!window.currentChatId) {
         console.warn('[socket] currentChatId не установлен');
-        return;
-    }
-    if (!socket.connected) {
-        console.warn('[socket] Не подключено к серверу');
         return;
     }
 
     const tempId = 'temp_' + Date.now();
     window.giga_addMessage(text, true, new Date(), 'sent', tempId);
 
-    console.log('[socket] Отправка:', { text, chatId: currentChatId });
+    console.log('[socket] Отправка:', { text, chatId: window.currentChatId });
 
-    socket.emit('send_message', { message_text: text }, (ack) => {
-        console.log('[socket] ACK получен:', ack); // 🔴 Вот этот лог ОБЯЗАН появиться
-        if (ack && ack.success && ack.message_id) {
-            updateMessageStatus(tempId, 'delivered');
-            const bubble = document.querySelector(`[data-mid="${tempId}"]`);
-            if (bubble) bubble.dataset.mid = ack.message_id;
-        } else {
-            console.error('[socket] Отправка не удалась:', ack);
+    const trySend = () => {
+        if (!window.socket) {
+            console.warn('[socket] Сокет не инициализирован');
+            setTimeout(trySend, 100);
+            return;
         }
-    });
+
+        if (!window.socket.connected) {
+            console.log('[socket] Ожидание подключения...');
+            setTimeout(trySend, 100);
+            return;
+        }
+
+        window.socket.emit('send_message', { message_text: text }, (ack) => {
+            console.log('[socket] ACK получен:', ack);
+            if (ack && ack.success && ack.message_id) {
+                updateMessageStatus(tempId, 'delivered');
+                const bubble = document.querySelector(`[data-mid="${tempId}"]`);
+                if (bubble) bubble.dataset.mid = ack.message_id;
+            } else {
+                console.error('[socket] Отправка не удалась:', ack);
+            }
+        });
+    };
+
+    trySend();
 }
 
-
-
 export function disconnect() {
-    if (socket) {
-        socket.disconnect();
-        socket = null;
+    if (window.socket) {
+        window.socket.disconnect();
+        window.socket = null;
     }
-    currentChatId = null;
     connectingToChatId = null;
 }
 
-// Для активности пользователя
 export function sendUserActive() {
-    if (socket?.connected) {
-        socket.emit('user_active');
+    if (window.socket?.connected) {
+        window.socket.emit('user_active');
     }
 }
 
-// Для отладки состояния
 export function getSocketState() {
-    return socket ? {
-        connected: socket.connected,
-        id: socket.id,
-        chatId: currentChatId
+    return window.socket ? {
+        connected: window.socket.connected,
+        id: window.socket.id,
+        chatId: window.currentChatId
     } : null;
 }
