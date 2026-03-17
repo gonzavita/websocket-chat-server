@@ -58,22 +58,33 @@ io.on('connection', (socket) => {
     });
 
     // Приход нового сообщения
-    socket.on('send_message', async (data) => {
-        const { message_text: content } = data;
-        const chatId = socket.handshake.query.chat_id;
+    socket.on('send_message', async (data, callback) => {
+    const { message_text: content } = data;
+    const chatId = socket.handshake.query.chat_id;
 
-        if (!content || !chatId) return;
+    if (!content || !chatId) {
+        if (callback) callback({ success: false, error: 'Invalid data' });
+        return;
+    }
 
-        // Отправляем сообщение всем в чате
-        io.to(`chat_${chatId}`).emit('new_message', {
-            id: uuidv4(), // временный ID, лучше генерировать на бэкенде
-            chat_id: chatId,
-            sender_id: userId,
-            content: content,
-            sent_at: new Date().toISOString(),
-            username: data.username || 'User'
-        });
+    const messageId = uuidv4();
+
+    // Рассылаем всем в чате
+    io.to(`chat_${chatId}`).emit('new_message', {
+        id: messageId,
+        chat_id: chatId,
+        sender_id: socket.userId,
+        content: content,
+        sent_at: new Date().toISOString(),
+        username: data.username || 'User'
     });
+
+    // ✅ Отправляем ACK отправителю
+    if (callback) {
+        callback({ success: true, message_id: messageId });
+    }
+});
+
 
     // Присоединение к чату
     socket.on('join', (data) => {
