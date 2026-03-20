@@ -3,86 +3,169 @@
 
 <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
     <title>💬 Messenger</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    animation: {
+                        fadeIn: 'fadeIn 0.2s ease-out',
+                        slideDown: 'slideDown 0.2s cubic-bezier(0.16, 1, 0.3, 1)'
+                    },
+                    keyframes: {
+                        fadeIn: {
+                            '0%': { opacity: '0', transform: 'translateY(4px)' },
+                            '100%': { opacity: '1', transform: 'translateY(0)' }
+                        },
+                        slideDown: {
+                            '0%': { transform: 'scaleY(0.9)', opacity: '0' },
+                            '100%': { transform: 'scaleY(1)', opacity: '1' }
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- Шрифт -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="css/telegram.css" />
+
+    <style>
+        html,
+        body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            overscroll-behavior: none;
+        }
+
+        #chatApp {
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        main {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            overflow: hidden;
+        }
+
+        #messages {
+            flex: 1;
+            min-height: 0;
+            overflow-y: auto;
+            scroll-behavior: smooth;
+        }
+
+        @supports (height: 100dvh) {
+
+            html,
+            body,
+            #chatApp,
+            main {
+                height: 100dvh;
+            }
+        }
+
+        @supports (padding-bottom: env(safe-area-inset-bottom)) {
+            .pb-safe {
+                padding-bottom: max(1rem, env(safe-area-inset-bottom));
+            }
+        }
+    </style>
 </head>
 
-<body>
-    <!-- === Основной интерфейс === -->
-    <div class="app" id="chatApp" style="display: none;">
-        <!-- Левая панель: чаты -->
-        <aside class="sidebar" id="sidebar">
-            <header class="sidebar-header">
-                <button class="menu-toggle" id="menuToggle">☰</button>
-                <h3>Чаты</h3>
-                <span id="logout" class="logout-btn">Выход</span>
-            </header>
+<body class="bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-white h-screen overflow-hidden font-sans">
 
-            <div class="search-box">
-                <input type="text" id="searchUsers" placeholder="Поиск..." />
-            </div>
+    <!-- Основной контейнер -->
+    <div id="chatApp" style="display: none;" class="h-full">
+        <div class="flex h-full flex-col lg:flex-row">
 
-            <!-- Результаты поиска -->
-            <div class="search-results" id="searchResults"></div>
+            <!-- Сайдбар -->
+            <aside id="sidebar"
+                class="fixed inset-y-0 left-0 z-50 w-80 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 transform transition-transform duration-300 lg:relative lg:w-96 -translate-x-full">
+                <div class="flex items-center justify-between p-4 border-b">
+                    <button id="menuToggle" class="text-xl lg:hidden">☰</button>
+                    <h3 class="text-lg font-medium">Чаты</h3>
+                    <span id="logout" class="text-blue-600 dark:text-blue-400">Выход</span>
+                </div>
+                <div class="p-3">
+                    <input type="text" id="searchUsers" placeholder="Поиск..."
+                        class="w-full p-2 border rounded-lg bg-gray-50 dark:bg-gray-700 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div id="searchResults" class="p-2 text-sm text-gray-500 dark:text-gray-400 hidden">
+                    Ничего не найдено
+                </div>
+                <div id="chatsList" class="flex-1 overflow-y-auto p-1 space-y-1"></div>
+            </aside>
 
-            <!-- Список чатов -->
-            <div class="chats-list" id="chatsList"></div>
-        </aside>
+            <!-- Overlay слева -->
+            <div id="overlayLeft" class="fixed inset-0 bg-black bg-opacity-50 z-40 hidden lg:hidden"></div>
 
-        <!-- Центр: чат -->
-        <main class="chat-main">
-            <header class="chat-header">
-                <div class="avatar" id="currentAvatar">A</div>
-                <span id="chatHeader">Выберите чат</span>
-                <div id="connection-status" class="status-indicator">оффлайн</div>
-            </header>
+            <!-- Чат -->
+            <main class="flex-1 flex flex-col bg-gray-50 dark:bg-gray-900 relative pb-safe">
+                <header class="flex items-center gap-3 p-4 bg-white dark:bg-gray-800 border-b z-10 sticky top-0">
+                    <button id="backBtn" class="lg:hidden text-xl">←</button>
+                    <div id="currentAvatar"
+                        class="w-10 h-10 bg-blue-500 text-white rounded-full flex items-center justify-center">A</div>
+                    <span id="chatHeader" class="font-medium">Выберите чат</span>
+                    <div id="connection-status" class="text-xs px-2 py-1 rounded-full bg-gray-300 text-white">оффлайн
+                    </div>
+                </header>
 
-            <div class="messages" id="messages"></div>
+                <!-- Сообщения -->
+                <div id="messages"
+                    class="flex-1 overflow-y-auto flex flex-col gap-3 p-3 animate-fadeIn pb-[60px] relative" style="background-image: linear-gradient(rgba(176, 180, 143, 0.85), rgba(225, 255, 158, 0.85)), url('../img/canvas.png');
+                           background-position: center;
+                           background-size: cover;
+                           background-attachment: fixed;
+                           background-repeat: no-repeat;">
+                </div>
 
-            <div class="input-area">
-                <input type="text" id="messageInput" placeholder="Сообщение..." />
-                <button id="sendBtn">➤</button>
-            </div>
-        </main>
+                <!-- Ввод -->
+                <div class="p-3 bg-white dark:bg-gray-800 border-t pb-safe">
+                    <form id="messageForm" class="flex gap-2">
+                        <textarea id="messageInput" placeholder="Введите сообщение" rows="1"
+                            class="flex-1 p-2 border rounded-full outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-gray-50 dark:bg-gray-700 dark:border-gray-600 resize-none"></textarea>
+                        <button type="submit"
+                            class="w-12 h-12 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 active:scale-95">➤</button>
+                    </form>
+                </div>
+            </main>
 
-        <!-- Правая панель: профиль -->
-        <aside class="profile-panel" id="profilePanel">
-            <header class="profile-header">
-                <button class="close-btn" id="closeProfile">×</button>
-                <div class="avatar">👤</div>
-                <h3 id="profileName">Профиль</h3>
-            </header>
-
-            <div class="profile-body">
-                <section class="profile-section">
-                    <h4>Аккаунт</h4>
-                    <div class="profile-row"><strong>Имя:</strong> <span id="profileFullName">Пользователь</span></div>
-                    <div class="profile-row"><strong>Email:</strong> <span id="profileEmail">—</span></div>
-                    <div class="profile-row"><strong>Телефон:</strong> <span id="profilePhone">—</span></div>
-                </section>
-
-                <section class="profile-section">
-                    <h4>Настройки</h4>
-                    <label class="toggle-row">
+            <!-- Профиль -->
+            <aside id="profilePanel"
+                class="fixed inset-y-0 right-0 z-50 w-80 bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 transform transition-transform duration-300 translate-x-full">
+                <div class="p-4 border-b">
+                    <button id="closeProfile" class="float-right text-2xl">×</button>
+                    <h3 class="text-lg font-medium">Профиль</h3>
+                </div>
+                <div class="p-4 space-y-4">
+                    <div><strong>Имя:</strong> <span id="profileFullName">Пользователь</span></div>
+                    <div><strong>Email:</strong> <span id="profileEmail">—</span></div>
+                    <div><strong>Телефон:</strong> <span id="profilePhone">—</span></div>
+                    <label class="flex justify-between items-center">
                         Тёмная тема
-                        <input type="checkbox" id="themeToggle" />
-                        <span class="toggle-slider"></span>
+                        <input type="checkbox" id="themeToggle" class="sr-only">
+                        <span
+                            class="toggle-slider w-11 h-6 bg-gray-300 rounded-full relative cursor-pointer after:absolute after:h-5 after:w-5 after:bottom-0.5 after:left-0.5 after:bg-white after:rounded-full after:transition-all checked:bg-blue-600 checked:after:translate-x-5"></span>
                     </label>
-                </section>
-
-                <button class="btn-danger" id="logoutFromProfile">Выйти из аккаунта</button>
-            </div>
-        </aside>
+                    <button id="logoutFromProfile"
+                        class="w-full p-2 bg-red-600 text-white rounded-lg hover:bg-red-700">Выйти из аккаунта</button>
+                </div>
+            </aside>
+            <div id="overlayRight" class="fixed inset-0 bg-black bg-opacity-50 z-40 hidden"></div>
+        </div>
     </div>
 
-    <!-- Overlay -->
-    <div class="overlay-left" id="overlayLeft"></div>
-    <div class="overlay-right" id="overlayRight"></div>
-
-
-    <!-- Подключение Socket.IO -->
+    <!-- Socket.IO -->
     <script src="/js/socket.io.min.js"></script>
 
     <!-- Глобальные переменные -->
@@ -103,10 +186,73 @@
         }
     </script>
 
-<!-- Подключение глобальных функций -->
-<script src="/js/globals.js"></script>
-    <!-- Все модули через main.js -->
-<script type="module" src="/js/main.js"></script>
+    <!-- Контекстное меню (Tailwind) -->
+    <div id="contextMenu"
+         class="hidden absolute bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg py-1 text-sm min-w-48 z-50 animate-slideDown origin-top">
+        <div data-action="reply"
+            class="flex items-center gap-2 px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer">
+            <span>↩️</span> Ответить
+        </div>
+        <div data-action="edit"
+            class="flex items-center gap-2 px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer">
+            <span>✏️</span> Изменить
+        </div>
+        <hr class="border-gray-200 dark:border-gray-700 my-1">
+        <div data-action="copy"
+            class="flex items-center gap-2 px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer">
+            <span>📋</span> Копировать текст
+        </div>
+        <div data-action="forward"
+            class="flex items-center gap-2 px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer">
+            <span>↪️</span> Переслать
+        </div>
+        <hr class="border-gray-200 dark:border-gray-700 my-1">
+        <div data-action="pin"
+            class="flex items-center gap-2 px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer">
+            <span>📌</span> Закрепить
+        </div>
+        <div data-action="delete"
+            class="flex items-center gap-2 px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer text-red-600 dark:text-red-400">
+            <span>🗑️</span> Удалить
+        </div>
+        <div data-action="select"
+            class="flex items-center gap-2 px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer">
+            <span>🔍</span> Выделить
+        </div>
+    </div>
+
+    <!-- Скрипты -->
+    <script src="/js/globals.js"></script>
+    <script type="module" src="/js/main.js"></script>
+
+    <!-- Фикс высоты экрана -->
+    <script>
+        function setViewportHeight() {
+            const vh = window.innerHeight * 0.01;
+            document.documentElement.style.setProperty('--vh', `${vh}px`);
+        }
+        setViewportHeight();
+        window.addEventListener('resize', setViewportHeight);
+    </script>
+    <!-- Система ответов -->
+    <script type="module" src="/js/reply-system.js"></script>
+    
+    <!-- Действия контекстного меню -->
+    <script type="module" src="/js/context-menu-actions.js"></script>
+    
+    <script type="module">
+        import { initReplySystem } from '/js/reply-system.js';
+        import { setupContextMenuActions } from '/js/context-menu-actions.js';
+
+        document.addEventListener('DOMContentLoaded', () => {
+            initReplySystem();
+
+            const contextMenu = document.getElementById('contextMenu');
+            if (contextMenu) {
+                setupContextMenuActions(contextMenu);
+            }
+        });
+    </script>
 
 </body>
 

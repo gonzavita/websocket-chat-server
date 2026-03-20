@@ -1,21 +1,120 @@
 // js/main.js
-import { loadChats as loadChatsFunc } from './chats.js';
 import { openChat } from './ui.js';
 import '/js/search.js';
 
 window.currentUser = null;
 window.currentChatId = null;
+window.currentMessageElement = null; // Для доступа из других модулей
 
-window.loadChats = () => {
-    if (window.currentUser && window.currentUser.id) {
-        loadChatsFunc();
+window.loadChats = async () => {
+    try {
+        const res = await fetch(`/api/chats?user_id=${window.currentUser.id}`);
+        const data = await res.json();
+
+        if (data.success && Array.isArray(data.chats)) {
+            const chatsList = document.getElementById('chatsList');
+            chatsList.innerHTML = '';
+
+            data.chats.forEach(chat => {
+                const chatId = chat.chat_id || chat.id;
+                const display_name = chat.display_name || 'Чат';
+                const firstLetter = display_name.charAt(0).toUpperCase();
+                const lastMessage = chat.last_message || 'Нет сообщений';
+
+                const onlineDot = chat.online
+                    ? '<div class="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></div>'
+                    : '';
+
+                const item = document.createElement('div');
+                item.className = 'chat-item p-3 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer flex items-center gap-3 border-b last:border-b-0 relative';
+                item.dataset.chatId = chatId;
+
+                item.innerHTML = `
+                    <div class="chat-avatar w-12 h-12 bg-blue-500 text-white rounded-full flex items-center justify-center text-lg font-medium relative">
+                        ${firstLetter}
+                        ${onlineDot}
+                    </div>
+                    <div class="chat-info flex-1 min-w-0">
+                        <div class="chat-name font-medium text-gray-800 dark:text-gray-100 truncate">${display_name}</div>
+                        <div class="chat-preview text-sm text-gray-500 dark:text-gray-400 truncate">${lastMessage}</div>
+                    </div>
+                `;
+
+                item.addEventListener('click', () => {
+                    openChat(chatId, display_name);
+                    if (window.innerWidth < 1024) {
+                        sidebar.classList.add('-translate-x-full');
+                        backBtn.style.display = 'block';
+                    }
+                });
+
+                chatsList.appendChild(item);
+            });
+        }
+    } catch (err) {
+        console.error('Ошибка загрузки чатов:', err);
     }
 };
 
+// === КОНТЕКСТНОЕ МЕНЮ ===
+const contextMenu = document.getElementById('contextMenu');
+
+// Скрываем при клике вне
+document.addEventListener('click', (e) => {
+    if (!contextMenu.contains(e.target) && !e.target.closest('.message-bubble')) {
+        contextMenu.classList.add('hidden');
+    }
+});
+
+// Обработка правого клика
+document.addEventListener('contextmenu', (e) => {
+    const bubble = e.target.closest('.message-bubble');
+    if (!bubble || !bubble.dataset.mid) return;
+
+    e.preventDefault();
+    window.currentMessageElement = bubble;
+
+    // Показываем для измерения
+    contextMenu.classList.remove('hidden');
+    contextMenu.style.position = 'fixed';
+    contextMenu.style.visibility = 'hidden';
+    document.body.appendChild(contextMenu);
+
+    const { width: menuWidth, height: menuHeight } = contextMenu.getBoundingClientRect();
+
+    contextMenu.style.visibility = 'visible';
+    contextMenu.classList.add('hidden');
+    contextMenu.style.position = 'absolute';
+
+    const x = e.clientX;
+    const y = e.clientY;
+    const winWidth = window.innerWidth;
+    const winHeight = window.innerHeight;
+
+    let left = x;
+    let top = y;
+
+    if (x + menuWidth > winWidth) left = winWidth - menuWidth - 10;
+    if (y + menuHeight > winHeight) top = winHeight - menuHeight - 10;
+    if (left < 10) left = 10;
+    if (top < 10) top = 10;
+
+    contextMenu.style.left = `${left}px`;
+    contextMenu.style.top = `${top}px`;
+    contextMenu.classList.remove('hidden');
+});
+
+// === ОСНОВНОЙ КОД ПРИЛОЖЕНИЯ ===
 document.addEventListener('DOMContentLoaded', () => {
     const savedUser = localStorage.getItem('currentUser');
     if (savedUser) {
-        window.currentUser = JSON.parse(savedUser);
+        try {
+            window.currentUser = JSON.parse(savedUser);
+        } catch (e) {
+            localStorage.removeItem('currentUser');
+            window.location.href = 'index.html';
+            return;
+        }
     } else {
         window.location.href = 'index.html';
         return;
@@ -33,18 +132,30 @@ document.addEventListener('DOMContentLoaded', () => {
     const closeProfile = document.getElementById('closeProfile');
     const overlayRight = document.getElementById('overlayRight');
     const messageInput = document.getElementById('messageInput');
-    const sendBtn = document.getElementById('sendBtn');
+    const messageForm = document.getElementById('messageForm');
+    const backBtn = document.getElementById('backBtn');
 
-    chatApp.style.display = 'flex';
+    chatApp.style.display = 'block';
     window.loadChats();
-    startStatusUpdateViaSocket();
+
+    backBtn?.addEventListener('click', () => {
+        sidebar.classList.remove('-translate-x-full');
+        window.currentChatId = null;
+        document.getElementById('chatHeader').textContent = 'Выберите чат';
+        document.getElementById('messages').innerHTML = '';
+        document.getElementById('connection-status').textContent = 'оффлайн';
+        backBtn.style.display = 'none';
+    });
 
     [logoutBtn, logoutFromProfile].forEach(btn => {
         btn?.addEventListener('click', () => {
             if (window.statusInterval) clearInterval(window.statusInterval);
+            if (window.readStatusInterval) clearInterval(window.readStatusInterval);
             window.currentUser = null;
             window.currentChatId = null;
+            window.socket?.disconnect?.();
             chatApp.style.display = 'none';
+            localStorage.removeItem('currentUser');
             window.location.href = 'index.html';
         });
     });
@@ -60,13 +171,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     currentAvatar?.addEventListener('click', () => {
-        profilePanel.classList.add('open');
-        overlayRight.classList.add('active');
+        profilePanel.classList.remove('translate-x-full');
+        overlayRight.classList.remove('hidden');
     });
 
     closeProfile?.addEventListener('click', () => {
-        profilePanel.classList.remove('open');
-        overlayRight.classList.remove('active');
+        profilePanel.classList.add('translate-x-full');
+        overlayRight.classList.add('hidden');
     });
 
     overlayRight?.addEventListener('click', (e) => {
@@ -74,54 +185,88 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     menuToggle?.addEventListener('click', () => {
-        sidebar.classList.add('hidden');
-        overlayLeft.classList.add('active');
+        sidebar.classList.remove('-translate-x-full');
+        overlayLeft.classList.remove('hidden');
     });
 
     overlayLeft?.addEventListener('click', () => {
-        sidebar.classList.remove('hidden');
-        overlayLeft.classList.remove('active');
+        sidebar.classList.add('-translate-x-full');
+        overlayLeft.classList.add('hidden');
     });
 
-    window.addEventListener('resize', () => {
-        if (window.innerWidth >= 768) {
-            sidebar.classList.remove('hidden');
-            overlayLeft.classList.remove('active');
-            profilePanel.classList.remove('open');
-            overlayRight.classList.remove('active');
+    function updateLayout() {
+        const isDesktop = window.innerWidth >= 1024;
+        if (isDesktop) {
+            sidebar.classList.remove('-translate-x-full');
+            overlayLeft.classList.add('hidden');
+            backBtn.style.display = 'none';
+        } else {
+            if (!window.currentChatId) {
+                sidebar.classList.remove('-translate-x-full');
+            }
+            overlayLeft.classList.add('hidden');
+            backBtn.style.display = 'none';
         }
+    }
+
+    updateLayout();
+    window.addEventListener('resize', updateLayout);
+
+    // === УМНЫЙ ТАЙМЕР АКТИВНОСТИ ===
+    let activityTimer;
+
+    function resetActivityTimer() {
+        if (activityTimer) clearTimeout(activityTimer);
+        import('./socket.js').then(m => m.sendUserActive());
+        activityTimer = setTimeout(() => {
+            console.log('🛑 Пользователь неактивен >5 сек');
+        }, 5000);
+    }
+
+    ['mousemove', 'keypress', 'click', 'scroll', 'touchstart'].forEach(event => {
+        window.addEventListener(event, resetActivityTimer);
     });
 
-    sendBtn?.addEventListener('click', async () => {
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) resetActivityTimer();
+    });
+
+    resetActivityTimer();
+
+    function wakeUpServer() {
+        fetch('/api/online').catch(() => {});
+    }
+    setInterval(wakeUpServer, 600000);
+    wakeUpServer();
+
+    // Автофокус и ресайз textarea
+    messageInput?.addEventListener('input', function () {
+        this.style.height = 'auto';
+        this.style.height = `${Math.min(this.scrollHeight, 100)}px`;
+    });
+
+    // Отправка сообщения
+    messageForm?.addEventListener('submit', async (e) => {
+        e.preventDefault();
         const text = messageInput.value.trim();
-        if (!text || !window.currentChatId || !window.currentUser) return;
+        const chatId = window.currentChatId;
+        if (!text || !chatId || !window.currentUser) return;
 
-        messageInput.value = '';
         try {
-            await import('./socket.js').then(m => m.sendMessage(text));
+            await import('./socket.js').then(m => m.sendMessage(text, chatId));
+            messageInput.value = '';
+            messageInput.style.height = 'auto';
         } catch (err) {
-            console.error('Send failed:', err);
-            alert('Сообщение не отправлено. Проверьте соединение.');
-            messageInput.value = text;
+            alert('Не удалось отправить сообщение');
         }
     });
 
-    messageInput?.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') sendBtn?.click();
+    messageInput?.addEventListener('focus', () => {
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                const messages = document.getElementById('messages');
+                messages.scrollTop = messages.scrollHeight;
+            });
+        });
     });
 });
-
-function startStatusUpdateViaSocket() {
-    if (window.statusInterval) clearInterval(window.statusInterval);
-
-    const interval = setInterval(() => {
-        import('./socket.js').then(m => {
-            if (m.getSocketState()?.connected && window.currentUser) {
-                clearInterval(interval);
-                window.statusInterval = setInterval(() => {
-                    m.sendUserActive();
-                }, 30000);
-            }
-        });
-    }, 500);
-}

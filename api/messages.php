@@ -31,6 +31,10 @@ if ($action === 'send' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
+    // Обновляем last_seen
+    $stmt = $pdo->prepare("UPDATE users SET last_seen = NOW() WHERE id = ?");
+    $stmt->execute([(int) $user_id]);
+
     try {
         $stmt = $pdo->prepare("SELECT id FROM chats WHERE id = ?");
         $stmt->execute([(int) $chat_id]);
@@ -48,7 +52,8 @@ if ($action === 'send' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         }
 
-        $stmt = $pdo->prepare("INSERT INTO messages (chat_id, sender_id, content, sent_at) VALUES (?, ?, ?, NOW())");
+        // Без sent_at — он по умолчанию
+        $stmt = $pdo->prepare("INSERT INTO messages (chat_id, sender_id, content) VALUES (?, ?, ?)");
         $stmt->execute([(int) $chat_id, (int) $user_id, $text]);
 
         $message_id = $pdo->lastInsertId();
@@ -71,6 +76,7 @@ if ($action === 'send' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     } catch (Exception $e) {
         http_response_code(500);
+        error_log("Send error: " . $e->getMessage());
         echo json_encode([
             'error' => 'Не удалось отправить сообщение',
             'debug' => $e->getMessage()
@@ -196,6 +202,53 @@ if ($action === 'get' && isset($_GET['chat_id'])) {
             'error' => 'Не удалось загрузить сообщения',
             'debug' => $e->getMessage()
         ]);
+        exit;
+    }
+}
+// === Массовая отметка прочитанных (batch_read) ===
+if ($action === 'batch_read' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $raw = file_get_contents('php://input');
+    $data = json_decode($raw, true);
+
+    $message_ids = $data['message_ids'] ?? [];
+    $user_id = (int) ($data['user_id'] ?? 0);
+
+    if (empty($message_ids) || !$user_id) {
+        http_response_code(400);
+        echo json_encode(['error' => 'message_ids и user_id обязательны']);
+        exit;
+    }
+
+    try {
+        // Проверим, что все сообщения принадлежат чатам пользователя
+        $placeholders = str_repeat('?,', count($message_ids) - 1) . '?';
+        $stmt = $pdo->prepare("
+            SELECT m.id, m.chat_id 
+            FROM messages m
+            INNER JOIN chat_participants cp ON m.chat_id = cp.chat_id 
+            WHERE m.id IN ($placeholders) AND cp.user_id = ?
+        ");
+        $stmt->execute(array_merge($message_ids, [$user_id]));
+        $validMessages = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+        if (empty($validMessages)) {
+            http_response_code(403);
+            echo json_encode(['error' => 'Нет доступа к этим сообщениям']);
+            exit;
+        }
+
+        // Вставляем только те, которых ещё нет
+        $insertStmt = $pdo->prepare("INSERT IGNORE INTO message_reads (message_id, user_id) VALUES (?, ?)");
+        foreach ($validMessages as $msgId) {
+            $insertStmt->execute([$msgId, $user_id]);
+        }
+
+        echo json_encode(['success' => true, 'read_count' => count($validMessages)]);
+        exit;
+    } catch (Exception $e) {
+        http_response_code(500);
+        error_log("Ошибка batch_read: " . $e->getMessage());
+        echo json_encode(['error' => 'Ошибка сервера']);
         exit;
     }
 }

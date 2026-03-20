@@ -20,9 +20,8 @@ if (!searchInput) {
         }
 
         try {
-            const res = await fetch(
-                `https://websocket-chat-server-lm97.onrender.com/api/search_users?user_id=${window.currentUser.id}&q=${encodeURIComponent(q)}`
-            );
+           const res = await fetch(`https://service-taxi31.ru/api/search_users?user_id=${window.currentUser.id}&q=${encodeURIComponent(q)}`);
+
             const data = await res.json();
 
             if (searchResults) {
@@ -43,4 +42,11 @@ if (!searchInput) {
             console.error('Ошибка поиска:', err);
         }
     };
+}
+export function sendUserActive() {
+    if (!window.socket || !window.currentUser) return;
+
+    window.socket.emit('user_active', {
+        user_id: window.currentUser.id
+    });
 }

@@ -3,7 +3,7 @@ import { openChat } from './ui.js';
 
 export async function createChatWith(userId, username) {
     try {
-        const res = await fetch('https://websocket-chat-server-lm97.onrender.com/api/chats', {
+        const res = await fetch('/api/chats', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ user_id: window.currentUser.id, interlocutor_id: userId })
@@ -31,7 +31,7 @@ export async function loadChats() {
     if (!chatList) return;
 
     try {
-        const res = await fetch(`https://websocket-chat-server-lm97.onrender.com/api/chats?user_id=${window.currentUser.id}`);
+        const res = await fetch(`/api/chats?user_id=${window.currentUser.id}`);
         const data = await res.json();
 
         chatList.innerHTML = '';
@@ -52,7 +52,8 @@ export async function loadChats() {
                         <div class="chat-preview">${lastMessageText}</div>
                     </div>
                 `;
-                div.onclick = () => openChat(chat.id, name);
+                const chatId = chat.chat_id || chat.id;
+                div.onclick = () => openChat(chatId, name);
                 chatList.appendChild(div);
             });
         } else {

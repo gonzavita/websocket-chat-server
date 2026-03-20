@@ -5,291 +5,227 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Вход • Messenger</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'] },
+                    colors: {
+                        primary: '#0088cc',
+                        'primary-hover': '#007abc'
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- Alpine.js -->
+    <script defer src="https://unpkg.com/alpinejs@3.15.8/dist/cdn.min.js"></script>
+
+    <!-- Шрифт Inter -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="css/telegram.css" />
+
     <style>
         body {
-            margin: 0;
             font-family: 'Inter', sans-serif;
-            background: #f5f5f7;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            padding: 20px;
         }
 
-        .auth-card {
-            width: 100%;
-            max-width: 380px;
-            background: white;
-            border-radius: 16px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
-            overflow: hidden;
-            text-align: center;
-            padding: 32px 24px;
-            border: 1px solid #e1e1e6;
-        }
-
-        .auth-card h1 {
-            font-size: 28px;
-            color: #1c1c1e;
-            margin-bottom: 8px;
-        }
-
-        .auth-card p {
-            color: #636366;
-            font-size: 15px;
-            margin-bottom: 24px;
-        }
-
-        .auth-card input {
-            width: 100%;
-            padding: 14px 16px;
-            border: 1px solid #e1e1e6;
-            border-radius: 12px;
-            background: #f9f9fb;
-            font-size: 15px;
-            outline: none;
-            transition: border 0.2s;
-        }
-
-        .auth-card input:focus {
-            border-color: #0088cc;
-            box-shadow: 0 0 0 2px rgba(0, 136, 204, 0.2);
-        }
-
-        button {
-            width: 100%;
-            padding: 14px;
-            background: #0088cc;
-            color: white;
-            border: none;
-            border-radius: 12px;
-            font-size: 16px;
-            font-weight: 500;
-            cursor: pointer;
-            margin-top: 16px;
-        }
-
-        button:hover {
-            background: #007abc;
-        }
-
-        .switch-link {
-            margin-top: 16px;
-            color: #636366;
-            font-size: 14px;
-        }
-
-        .switch-link a {
-            color: #0088cc;
-            text-decoration: none;
-        }
-
-        .feedback {
-            font-size: 13px;
-            color: #e74c3c;
-            text-align: left;
-            height: 16px;
-            margin-top: -4px;
-            opacity: 0;
-            transition: opacity 0.2s;
-        }
-
-        .feedback.active {
-            opacity: 1;
+        input::-webkit-outer-spin-button,
+        input::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
         }
     </style>
 </head>
 
-<body>
-    <div class="auth-card">
-        <h1>💬 Messenger</h1>
-        <p>Быстро и безопасно</p>
+<body
+    class="bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-white min-h-screen flex items-center justify-center p-4">
+
+<div x-data="{
+    showLogin: true,
+    rawPhone: '',
+
+    // Форматированный номер телефона
+    get formattedPhone() {
+        let v = this.rawPhone.replace(/\D/g, '');
+        if (v.startsWith('8') && v.length > 1) v = '7' + v.slice(1);
+        else if (!v.startsWith('7')) v = '7' + v;
+        v = v.slice(0, 11);
+
+        if (v.length === 0) return '+7 ';
+        if (v.length < 4) return `+7 (${v}`;
+        if (v.length < 7) return `+7 (${v.slice(1, 4)}) ${v.slice(4)}`;
+        if (v.length < 9) return `+7 (${v.slice(1, 4)}) ${v.slice(4, 7)}-${v.slice(7)}`;
+        if (v.length < 11) return `+7 (${v.slice(1, 4)}) ${v.slice(4, 7)}-${v.slice(7, 9)}-${v.slice(9)}`;
+        return `+7 (${v.slice(1, 4)}) ${v.slice(4, 7)}-${v.slice(7, 9)}-${v.slice(9, 11)}`;
+    },
+
+    updateRawPhone(event) {
+        const input = event.target.value;
+        let digits = input.replace(/\D/g, '');
+
+        if (digits.startsWith('8') && digits.length > 1) {
+            digits = '7' + digits.slice(1);
+        }
+        if (digits && !digits.startsWith('7')) {
+            digits = '7' + digits;
+        }
+
+        this.rawPhone = digits.slice(0, 11);
+    },
+
+    focusInput(el) {
+        if (!this.rawPhone) {
+            el.value = '+7 ';
+            setTimeout(() => {
+                el.setSelectionRange(3, 3);
+            }, 1);
+        }
+    },
+
+    // ✅ Вход через /api/login
+    async login(event) {
+        const form = event.target;
+        const data = new FormData(form);
+        const payload = Object.fromEntries(data);
+
+        try {
+            const res = await fetch('/api/login', {  // 🔥 БЕЗ .php!
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const result = await res.json();
+            if (result.success) {
+                localStorage.setItem('currentUser', JSON.stringify(result.user));
+                alert('Вход выполнен!');
+                window.location.href = 'chat.html';
+            } else {
+                alert('Ошибка: ' + result.error);
+            }
+        } catch (err) {
+            console.error('Ошибка входа:', err);
+            alert('Не удалось подключиться к серверу');
+        }
+    },
+
+    // ✅ Регистрация через /api/register
+    async register(event) {
+        const form = event.target;
+        const username = form.username.value.trim();
+        const email = form.email.value.trim();
+        const password = form.password.value.trim();
+
+        if (username.length < 3) {
+            alert('Логин должен быть не менее 3 символов');
+            return;
+        }
+        if (!email.includes('@')) {
+            alert('Некорректный email');
+            return;
+        }
+        if (password.length < 6) {
+            alert('Пароль должен быть не менее 6 символов');
+            return;
+        }
+
+        try {
+            const res = await fetch('/api/register', {  // 🔥 БЕЗ .php!
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    username,
+                    email,
+                    phone: this.rawPhone,
+                    password
+                })
+            });
+            const result = await res.json();
+            if (result.success) {
+                alert('Регистрация успешна! Теперь войдите.');
+                this.showLogin = true;
+                this.rawPhone = '';
+            } else {
+                alert('Ошибка: ' + result.error);
+            }
+        } catch (err) {
+            console.error('Ошибка регистрации:', err);
+            alert('Не удалось подключиться к серверу');
+        }
+    }
+}"
+
+        class="w-full max-w-md bg-white dark:bg-gray-800 rounded-2xl shadow-xl overflow-hidden border border-gray-200 dark:border-gray-700">
+
+        <!-- Заголовок -->
+        <div class="text-center py-8 px-6">
+            <h1 class="text-3xl font-bold text-primary">💬 Messenger</h1>
+            <p class="text-gray-500 dark:text-gray-400 mt-2">Быстро и безопасно</p>
+        </div>
 
         <!-- Форма входа -->
-        <form id="loginForm">
-            <input type="text" name="username" placeholder="Телефон или логин" required />
-            <input type="password" name="password" placeholder="Пароль" required />
-            <button type="submit">Войти</button>
-            <div class="switch-link">Нет аккаунта? <a id="toRegister">Зарегистрироваться</a></div>
+        <form x-show="showLogin" @submit.prevent="login" class="px-6 pb-6 space-y-4 transition-all duration-300">
+            <div class="space-y-2">
+                <input type="text" name="username" placeholder="Телефон или логин" required
+                    class="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-gray-50 dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+            </div>
+            <div class="space-y-2">
+                <input type="password" name="password" placeholder="Пароль" required
+                    class="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-gray-50 dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+            </div>
+            <button type="submit"
+                class="w-full py-3 bg-primary text-white rounded-xl font-medium hover:bg-primary-hover active:scale-95 transition-all shadow-md">
+                Войти
+            </button>
+            <div class="text-center text-sm text-gray-500 dark:text-gray-400 mt-4">
+                Нет аккаунта?
+                <a @click="showLogin = false"
+                    class="text-primary font-medium hover:underline cursor-pointer">Зарегистрироваться</a>
+            </div>
         </form>
 
         <!-- Форма регистрации -->
-        <form id="registerForm" style="display: none;">
-            <input type="text" name="username" placeholder="Логин" required />
-            <div class="feedback" id="usernameFeedback"></div>
+        <form x-show="!showLogin" @submit.prevent="register" class="px-6 pb-6 space-y-4 transition-all duration-300">
+            <!-- Логин -->
+            <div class="space-y-1">
+                <input type="text" name="username" placeholder="Логин" required
+                    class="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-gray-50 dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+            </div>
 
-            <input type="email" name="email" placeholder="Email" required />
-            <input type="tel" name="phone" id="phoneInput" placeholder="+7 (999) 123-45-67" maxlength="18"
-                autocomplete="tel" required />
-            <div class="feedback" id="phoneFeedback"></div>
+            <!-- Email -->
+            <div class="space-y-2">
+                <input type="email" name="email" placeholder="Email" required
+                    class="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-gray-50 dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+            </div>
 
-            <input type="password" name="password" placeholder="Пароль" required />
-            <button type="submit">Регистрация</button>
-            <div class="switch-link">Уже есть? <a id="toLogin">Войти</a></div>
+            <!-- Телефон -->
+            <div class="space-y-1">
+                <input type="text" x-model="formattedPhone" @input="updateRawPhone($event)" @focus="focusInput($el)"
+                    placeholder="+7 (999) 123-45-67" autocomplete="tel" required
+                    class="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-gray-50 dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+            </div>
+
+            <!-- Пароль -->
+            <div class="space-y-2">
+                <input type="password" name="password" placeholder="Пароль" required
+                    class="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-gray-50 dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+            </div>
+
+            <button type="submit"
+                class="w-full py-3 bg-primary text-white rounded-xl font-medium hover:bg-primary-hover active:scale-95 transition-all shadow-md">
+                Регистрация
+            </button>
+
+            <div class="text-center text-sm text-gray-500 dark:text-gray-400 mt-4">
+                Уже есть аккаунт?
+                <a @click="showLogin = true" class="text-primary font-medium hover:underline cursor-pointer">Войти</a>
+            </div>
         </form>
     </div>
-
-    <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            const toRegister = document.getElementById('toRegister');
-            const toLogin = document.getElementById('toLogin');
-            const loginForm = document.getElementById('loginForm');
-            const registerForm = document.getElementById('registerForm');
-
-            // === Применить маску ТОЛЬКО при показе формы регистрации ===
-            function applyPhoneMask() {
-                const phoneInput = document.getElementById('phoneInput');
-                if (!phoneInput || phoneInput.dataset.masked === 'true') return;
-
-                phoneInput.dataset.masked = 'true';
-
-                // Устанавливаем начальное значение
-                if (!phoneInput.value) phoneInput.value = '+7 ';
-
-                // При фокусе
-                phoneInput.onfocus = function () {
-                    if (!this.value || this.value === '+7') {
-                        this.value = '+7 ';
-                        setTimeout(() => this.setSelectionRange(3, 3), 10);
-                    }
-                };
-
-                // При вводе — форматируем
-                phoneInput.oninput = function () {
-                    const start = this.selectionStart;
-                    const raw = this.value.replace(/\D/g, '');
-                    let clean = raw;
-
-                    if (clean.startsWith('8') && clean.length > 1) clean = '7' + clean.slice(1);
-                    else if (!clean.startsWith('7')) clean = '7' + clean;
-                    clean = clean.slice(0, 11);
-
-                    let formatted = '+7 ';
-                    if (clean.length >= 4) {
-                        formatted = `+7 (${clean.slice(1, 4)})`;
-                        if (clean.length >= 7) {
-                            formatted += ` ${clean.slice(4, 7)}`;
-                            if (clean.length >= 9) {
-                                formatted += `-${clean.slice(7, 9)}`;
-                                if (clean.length === 11) {
-                                    formatted += `-${clean.slice(9, 11)}`;
-                                }
-                            }
-                        }
-                    } else if (clean.length > 1) {
-                        formatted = `+7 (${clean.slice(1)}`;
-                    }
-
-                    if (formatted !== this.value) {
-                        const oldVal = this.value;
-                        this.value = formatted;
-                        const delta = formatted.length - oldVal.length;
-                        this.setSelectionRange(start + delta, start + delta);
-                    }
-                };
-
-                console.log('✅ Маска телефона применена');
-            }
-
-            // Переход к регистрации
-            toRegister?.addEventListener('click', (e) => {
-                e.preventDefault();
-                loginForm.style.display = 'none';
-                registerForm.style.display = 'block';
-                setTimeout(applyPhoneMask, 50); // даём время на рендер
-            });
-
-            // Переход ко входу
-            toLogin?.addEventListener('click', (e) => {
-                e.preventDefault();
-                registerForm.style.display = 'none';
-                loginForm.style.display = 'block';
-            });
-
-            // === Вход ===
-            loginForm?.addEventListener('submit', async (e) => {
-                e.preventDefault();
-                const u = e.target.username.value.trim();
-                const p = e.target.password.value.trim();
-
-                if (!u || !p) return alert('Заполните поля');
-
-                try {
-                    const res = await fetch('https://service-taxi31.ru/api/login.php', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        credentials: 'include',
-                        body: JSON.stringify({ username: u, password: p })
-                    });
-                    const data = await res.json();
-
-                    if (data.success) {
-                        localStorage.setItem('currentUser', JSON.stringify(data.user));
-                        window.location.href = 'chat.html';
-                    } else {
-                        alert('Ошибка: ' + (data.error || 'Неверные данные'));
-                    }
-                } catch (err) {
-                    alert('Не удалось подключиться');
-                }
-            });
-
-            // === Регистрация ===
-            registerForm?.addEventListener('submit', async (e) => {
-                e.preventDefault();
-                const username = e.target.username.value.trim();
-                const email = e.target.email.value.trim();
-                const phone = document.getElementById('phoneInput').value.replace(/\D/g, '').slice(0, 11);
-                const password = e.target.password.value;
-
-                if (username.length < 3) {
-                    const fb = document.getElementById('usernameFeedback');
-                    fb.textContent = 'Логин должен быть не менее 3 символов';
-                    fb.classList.add('active');
-                    return;
-                }
-
-                if (!email.includes('@')) {
-                    alert('Некорректный email');
-                    return;
-                }
-
-                if (!phone || phone.length !== 11 || !phone.startsWith('7')) {
-                    const fb = document.getElementById('phoneFeedback');
-                    fb.textContent = 'Введите корректный номер';
-                    fb.classList.add('active');
-                    return;
-                }
-
-                if (password.length < 6) {
-                    alert('Пароль должен быть не менее 6 символов');
-                    return;
-                }
-
-                try {
-                    const res = await fetch('https://service-taxi31.ru/api/register.php', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ username, email, phone, password })
-                    });
-                    const data = await res.json();
-
-                    if (data.success) {
-                        alert('Регистрация успешна! Теперь войдите.');
-                        registerForm.style.display = 'none';
-                        loginForm.style.display = 'block';
-                    } else {
-                        alert('Ошибка: ' + data.error);
-                    }
-                } catch (err) {
-                    alert('Не удалось подключиться к серверу');
-                }
-            });
-        });
-    </script>
 </body>
 
 </html>
