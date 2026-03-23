@@ -12,6 +12,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 }
 
 include 'db.php';
+include 'jwt.php'; // Подключаем генератор токена
 
 $raw = file_get_contents('php://input');
 $data = json_decode($raw, true);
@@ -40,11 +41,17 @@ $user = $stmt->fetch();
 if ($user && password_verify($password, $user['password_hash'])) {
     unset($user['password_hash']);
 
+    // Обновляем last_seen
     $stmt = $pdo->prepare("UPDATE users SET last_seen = NOW() WHERE id = ?");
     $stmt->execute([$user['id']]);
 
+    // Генерируем JWT
+    $token = generateJWT($user['id']);
+
+    // Возвращаем токен
     echo json_encode([
         'success' => true,
+        'token' => $token,
         'user' => $user
     ]);
 } else {

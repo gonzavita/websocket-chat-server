@@ -17,8 +17,8 @@ export function setupContextMenuActions(contextMenu) {
 
         if (!currentMessageElement) return;
 
-        const midEl = currentMessageElement.querySelector('[data-mid]');
-        const messageId = midEl ? midEl.dataset.mid : null;
+        // === ИСПРАВЛЕНО: data-mid на самом элементе ===
+        const messageId = currentMessageElement.dataset.mid || null;
         const messageText = currentMessageElement.querySelector('span.block')?.textContent || '';
 
         switch (action) {

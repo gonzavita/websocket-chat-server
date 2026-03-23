@@ -39,13 +39,18 @@ export function replyToMessage(messageElement, messageId, messageText) {
 
     replyData = { messageId, messageText, senderName };
 
-    document.getElementById('reply-sender').textContent = senderName;
-    document.getElementById('reply-text').textContent = messageText;
+    const senderEl = document.getElementById('reply-sender');
+    const textEl = document.getElementById('reply-text');
+
+    if (senderEl) senderEl.textContent = senderName;
+    if (textEl) textEl.textContent = messageText;
+
     replyPreview.classList.remove('hidden');
 
     const input = document.getElementById('messageInput');
-    input?.focus();
+    if (input) input.focus();
 }
+
 
 export function getReplyData() {
     return replyData;
@@ -55,3 +60,5 @@ export function cancelReply() {
     replyData = null;
     replyPreview.classList.add('hidden');
 }
+window.getReplyData = getReplyData;
+window.cancelReply = cancelReply;

@@ -1,17 +1,30 @@
-// js/ui.js
-import { connectToChat } from './socket.js';
+// js/ui.js — С ЛОГИРОВАНИЕМ для диагностики
+import { connectToChat, getParticipants, getReadStatus, markAllReceivedAsRead } from './socket.js';
 
 export let currentChatId = null;
 let lastMarkedMessageId = null;
 const participantsCache = {};
+let tempMessageCounter = 0;
 
-// Храним интервалы для очистки
+export const knownReadStatus = new Set();
+const seenMessageIds = new Set();
+
+console.log('📊 [UI] Модуль ui.js загружен');
+
+export function generateTempId() {
+    return `temp_${Date.now()}_${++tempMessageCounter}`;
+}
+
 if (!window.readStatusInterval) window.readStatusInterval = null;
 
 export function setConnectionStatus() {
     const el = document.getElementById('connection-status');
-    if (!el || !window.currentChatId) return;
+    if (!el || !window.currentChatId) {
+        console.log('📍 setConnectionStatus: элемент статуса не найден или нет чата');
+        return;
+    }
 
+    console.log('📍 setConnectionStatus: обновляем статус для чата', window.currentChatId);
     getParticipants(window.currentChatId).then(data => {
         if (data?.success && Array.isArray(data.users)) {
             const interlocutor = data.users.find(u => u.id !== window.currentUser.id);
@@ -74,38 +87,54 @@ function formatLastSeen(date) {
 
 export function updateMessageStatus(messageId, status) {
     const id = String(messageId);
-
     const wrapper = document.querySelector(`[data-mid="${id}"]`);
     if (!wrapper) {
-        console.warn('❌ Не найден элемент для messageId:', id);
+        console.log('🔄 updateMessageStatus: элемент не найден (возможно, ещё не добавлен)', id);
         return;
     }
 
     const icon = wrapper.querySelector('.status-icon');
     if (icon) {
         icon.textContent = status === 'read' ? '✓✓' : '✓';
-        //console.log('✅ Статус обновлён:', icon.textContent);
-    } else {
-        console.warn('❌ Нет .status-icon в элементе:', wrapper);
+    }
+
+    if (status === 'read') {
+        knownReadStatus.add(id);
     }
 }
 
 export function updateMessageId(oldId, newId) {
     const bubble = document.querySelector(`[data-mid="${String(oldId)}"]`);
-    if (!bubble) return;
+    if (!bubble) {
+        console.warn('⚠️ Не найдено сообщение для обновления ID:', oldId);
+        return;
+    }
     bubble.dataset.mid = String(newId);
+    console.log('🔁 ID сообщения обновлён:', oldId, '→', newId);
 }
 
-export function addMessageIfNotExists(content, isSent, timestamp, status = 'sent', messageId = null, options = {}) {
+// Добавляет сообщение: prepend = true → в начало, false → в конец
+export function addMessageIfNotExists(content, isSent, timestamp, status = 'sent', messageId = null, options = {}, prepend = false) {
     const messagesContainer = document.getElementById('messages');
-    if (!messagesContainer) return;
+    const id = messageId !== null ? String(messageId) : null;
 
-    const { reply_to = null, reply_text = '', reply_sender = '' } = options;
-
-    if (messageId && messagesContainer.querySelector(`[data-mid="${String(messageId)}"]`)) {
+    if (id && seenMessageIds.has(id)) {
         return;
     }
 
+    if (id) {
+        seenMessageIds.add(id);
+    }
+
+    // Создание typing-indicator при необходимости
+    if (!document.getElementById('typing-indicator')) {
+        const typingEl = document.createElement('div');
+        typingEl.id = 'typing-indicator';
+        typingEl.className = 'text-xs text-gray-500 italic px-4 py-1 hidden';
+        messagesContainer.parentElement.insertBefore(typingEl, messagesContainer.nextSibling);
+    }
+
+    const { reply_to = null, reply_text = '', reply_sender = '' } = options;
     const now = timestamp instanceof Date ? timestamp : new Date();
     const timeStr = new Intl.DateTimeFormat('ru-RU', {
         hour: '2-digit',
@@ -113,31 +142,53 @@ export function addMessageIfNotExists(content, isSent, timestamp, status = 'sent
     }).format(now);
 
     const wrapper = document.createElement('div');
-    wrapper.dataset.mid = String(messageId || '');
+    wrapper.dataset.mid = id || '';
     wrapper.className = isSent
         ? 'mb-4 max-w-[80%] self-end message-bubble'
         : 'flex items-end gap-2 mb-4 max-w-[80%] self-start message-bubble';
+
+    if (!isSent) {
+        wrapper.setAttribute('data-sent', 'false');
+    }
 
     const messageDiv = document.createElement('div');
     messageDiv.className = isSent
         ? 'bg-blue-500 text-white rounded-lg rounded-tr-none px-4 py-2 text-sm leading-relaxed break-words'
         : 'bg-gray-100 dark:bg-gray-700 rounded-lg rounded-tl-none px-4 py-2 text-gray-800 dark:text-gray-100 text-sm leading-relaxed break-words';
 
-    // === Цитата (если есть) ===
     if (reply_to) {
         const replyEl = document.createElement('div');
-        replyEl.className = 'flex items-start gap-2 text-xs italic opacity-90 mb-1 pl-2 border-l-2 border-blue-400';
+        replyEl.className = 'flex items-start gap-2 text-xs italic opacity-90 mb-1 pl-2 border-l-2 border-blue-500 cursor-pointer hover:opacity-100 transition-opacity';
+
+        const senderName = reply_sender || 'Собеседник';
+        let text = reply_text;
+
+        if (!text) {
+            replyEl.classList.add('opacity-50');
+            text = '[сообщение удалено]';
+        }
+
         replyEl.innerHTML = `
             <span>↩️</span>
             <div class="flex-1">
-                <div class="font-medium">${reply_sender}</div>
-                <div class="truncate">${reply_text}</div>
+                <div class="font-medium">${senderName}</div>
+                <div class="truncate">${text}</div>
             </div>
         `;
+
+        replyEl.addEventListener('click', () => {
+            const target = messagesContainer.querySelector(`[data-mid="${String(reply_to)}"]`);
+            if (target) {
+                target.style.transition = 'background-color 0.3s ease';
+                target.style.backgroundColor = 'rgba(59, 130, 246, 0.2)';
+                setTimeout(() => target.style.backgroundColor = '', 1000);
+                target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        });
+
         messageDiv.appendChild(replyEl);
     }
 
-    // === Основной текст ===
     const contentLine = document.createElement('div');
     contentLine.className = 'flex items-end justify-between min-h-[1.5em]';
 
@@ -163,7 +214,6 @@ export function addMessageIfNotExists(content, isSent, timestamp, status = 'sent
     contentLine.appendChild(metaSpan);
     messageDiv.appendChild(contentLine);
 
-    // === Аватар для входящих ===
     if (!isSent) {
         const avatarDiv = document.createElement('div');
         avatarDiv.className = 'w-8 h-8 bg-blue-500 text-white rounded-full flex items-center justify-center text-sm font-medium';
@@ -173,105 +223,227 @@ export function addMessageIfNotExists(content, isSent, timestamp, status = 'sent
     }
 
     wrapper.appendChild(messageDiv);
-    messagesContainer.appendChild(wrapper);
-    messagesContainer.scrollTop = messagesContainer.scrollHeight;
-}
 
+    // Вставка: в начало или в конец
+    if (prepend) {
+        messagesContainer.insertBefore(wrapper, messagesContainer.firstChild);
+    } else {
+        messagesContainer.appendChild(wrapper);
+    }
 
-function formatDateHeader(date) {
-    const now = new Date();
-    const yesterday = new Date(now);
-    yesterday.setDate(yesterday.getDate() - 1);
-    const msgStr = date.toISOString().split('T')[0];
-    const todayStr = now.toISOString().split('T')[0];
-    const yesterdayStr = yesterday.toISOString().split('T')[0];
-
-    if (msgStr === todayStr) return 'Сегодня';
-    if (msgStr === yesterdayStr) return 'Вчера';
-    return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
+    // Прокрутка только если это НЕ prepend
+    if (!prepend) {
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
 }
 
 export async function openChat(chatId, initialName = 'Чат') {
+    console.log('🔧 openChat вызван', { chatId, currentChatId, opening: window.openingChat });
+
     if (!chatId) {
-        console.warn('❌ openChat: chatId не указан');
+        console.error('❌ openChat: chatId не указан');
         return;
     }
 
-    // Очищаем предыдущие интервалы
+    if (currentChatId === chatId) {
+        console.log('🚫 Чат уже открыт:', chatId);
+        return;
+    }
+
+    if (window.openingChat === chatId) {
+        console.log('🟡 Открытие уже в процессе:', chatId);
+        return;
+    }
+
+    window.openingChat = chatId;
+    localStorage.setItem('lastOpenedChat', chatId);
+
     if (window.readStatusInterval) {
         clearInterval(window.readStatusInterval);
         window.readStatusInterval = null;
+        console.log('🧹 Очищен интервал readStatusInterval');
     }
 
-    if (currentChatId === chatId) return;
+    knownReadStatus.clear();
+    seenMessageIds.clear();
+    console.log('🧹 Очищены кэши knownReadStatus и seenMessageIds');
 
     currentChatId = chatId;
     window.currentChatId = chatId;
 
     const header = document.getElementById('chatHeader');
     const messages = document.getElementById('messages');
-    if (messages) messages.innerHTML = '';
 
+    if (messages) {
+        console.log('🗑️ Очистка контейнера сообщений');
+        messages.innerHTML = '';
+    }
+
+    let typingEl = document.getElementById('typing-indicator');
+    if (!typingEl) {
+        typingEl = document.createElement('div');
+        typingEl.id = 'typing-indicator';
+        typingEl.className = 'text-xs text-gray-500 italic px-4 py-1 hidden';
+        messages.parentElement.insertBefore(typingEl, messages.nextSibling);
+    } else {
+        typingEl.classList.add('hidden');
+    }
+
+    // --- Переменные для пагинации ---
+    let messageOffset = 0;
+    let hasMoreMessages = true;
+    let loadingMore = false;
+
+    function showLoadingTop(show) {
+        let loader = document.getElementById('scroll-loader');
+        if (!loader) {
+            loader = document.createElement('div');
+            loader.id = 'scroll-loader';
+            loader.className = 'text-center text-gray-500 text-xs py-2';
+            loader.textContent = 'Загрузка...';
+            messages.prepend(loader);
+        }
+        loader.style.display = show ? 'block' : 'none';
+    }
+
+    async function loadMoreMessages() {
+        if (loadingMore || !hasMoreMessages) return;
+        loadingMore = true;
+        showLoadingTop(true);
+
+        try {
+            const res = await fetch(`/api/messages/get?chat_id=${chatId}&limit=50&offset=${messageOffset}`);
+            const result = await res.json();
+
+            if (result.messages && Array.isArray(result.messages) && result.messages.length > 0) {
+                const prevScrollHeight = messages.scrollHeight;
+
+                // Добавляем старые сообщения ВНАЧАЛЕ (prepend = true)
+                result.messages.forEach(msg => {
+                    const isSent = String(msg.sender_id) === String(window.currentUser.id);
+                    addMessageIfNotExists(
+                        msg.content,
+                        isSent,
+                        new Date(msg.sent_at),
+                        'delivered',
+                        msg.id,
+                        {
+                            reply_to: msg.reply_to || null,
+                            reply_text: msg.reply_text || '',
+                            reply_sender: msg.reply_sender || ''
+                        },
+                        true // ← prepend: вставить в начало
+                    );
+                });
+
+                messageOffset += result.messages.length;
+                if (result.messages.length < 50) hasMoreMessages = false;
+
+                // Сохраняем позицию прокрутки
+                requestAnimationFrame(() => {
+                    messages.scrollTop = messages.scrollHeight - prevScrollHeight;
+                });
+            } else {
+                hasMoreMessages = false;
+            }
+        } catch (err) {
+            console.error('❌ Ошибка подгрузки истории:', err);
+        } finally {
+            loadingMore = false;
+            showLoadingTop(false);
+        }
+    }
+
+    // Слушаем прокрутку вверх
+    messages.addEventListener('scroll', () => {
+        if (messages.scrollTop <= 10 && hasMoreMessages && !loadingMore) {
+            loadMoreMessages();
+        }
+    });
+
+    // Подключаемся к Socket.IO
     connectToChat(chatId, window.currentUser.id);
 
     try {
-        const res = await fetch(`/api/messages/get?chat_id=${chatId}`);
+        console.log('📡 Запрос истории сообщений для чата', chatId);
+        const res = await fetch(`/api/messages/get?chat_id=${chatId}&limit=50`);
         const result = await res.json();
 
         if (result.messages && Array.isArray(result.messages)) {
-            result.messages.forEach(msg => {
-                const isSent = String(msg.sender_id) === String(window.currentUser.id);
-                addMessageIfNotExists(
-                    msg.content,
-                    isSent,
-                    new Date(msg.sent_at),
-                    'delivered',
-                    msg.id
-                );
-            });
+    console.log('✅ История получена, количество:', result.messages.length);
 
-            // Обновляем статусы прочтения отправленных сообщений
+    // 🔹 КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: reverse()
+    [...result.messages].reverse().forEach(msg => {
+        const isSent = String(msg.sender_id) === String(window.currentUser.id);
+        addMessageIfNotExists(
+            msg.content,
+            isSent,
+            new Date(msg.sent_at),
+            'delivered',
+            msg.id,
+            {
+                reply_to: msg.reply_to || null,
+                reply_text: msg.reply_text || '',
+                reply_sender: msg.reply_sender || ''
+            },
+            false
+        );
+    });
+
+    messageOffset = result.messages.length;
+    hasMoreMessages = result.messages.length >= 50;
+
+            // Обновление статусов прочтения
             const sentIds = result.messages
                 .filter(m => m.sender_id == window.currentUser.id)
                 .map(m => m.id);
 
             if (sentIds.length > 0) {
+                console.log('🔍 Запрос статусов прочтения для:', sentIds);
                 const statuses = await getReadStatus(chatId, sentIds);
                 Object.entries(statuses).forEach(([msgId, status]) => {
                     updateMessageStatus(parseInt(msgId), status);
                 });
             }
+        } else {
+            console.warn('⚠️ Нет сообщений в истории');
+            hasMoreMessages = false;
         }
     } catch (err) {
-        console.error('Ошибка загрузки истории:', err);
+        console.error('❌ Ошибка загрузки истории:', err);
+        hasMoreMessages = false;
     }
 
+    // Обновление участников
     try {
         const data = await getParticipants(chatId);
         if (data?.success && Array.isArray(data.users)) {
             const interlocutor = data.users.find(u => u.id !== window.currentUser.id);
             if (interlocutor) {
+                window.interlocutorId = interlocutor.id;
                 if (header) header.textContent = interlocutor.username;
                 const avatar = document.getElementById('currentAvatar');
-                if (avatar) {
-                    avatar.textContent = interlocutor.username.charAt(0).toUpperCase();
-                }
+                if (avatar) avatar.textContent = interlocutor.username.charAt(0).toUpperCase();
             } else if (header) {
                 header.textContent = initialName;
             }
         }
     } catch (err) {
-        console.error('Ошибка участников:', err);
+        console.error('❌ Ошибка участников:', err);
         if (header) header.textContent = initialName;
     }
 
-    // Принудительно проверяем прочитанные и обновляем свои статусы
+    // Отметка прочитанных
     setTimeout(async () => {
         await markAllReceivedAsRead(chatId);
+        console.log('📌 Отметка всех полученных как прочитанных');
 
-        // 🔁 Принудительно обновляем статусы своих сообщений
         const sentMessages = messages.querySelectorAll('.self-end[data-mid]');
-        const sentIds = Array.from(sentMessages).map(el => parseInt(el.dataset.mid)).filter(id => !isNaN(id));
+        const sentIds = Array.from(sentMessages)
+            .map(el => parseInt(el.dataset.mid))
+            .filter(id => !isNaN(id))
+            .slice(-50);
+
         if (sentIds.length > 0) {
             const statuses = await getReadStatus(chatId, sentIds);
             Object.entries(statuses).forEach(([msgId, status]) => {
@@ -281,17 +453,22 @@ export async function openChat(chatId, initialName = 'Чат') {
 
         messages.scrollTop = messages.scrollHeight;
     }, 500);
-    // После openChat
+
+    // Фокус окна
     window.addEventListener('focus', () => {
         if (window.currentChatId) {
             markAllReceivedAsRead(window.currentChatId);
         }
     });
 
-    // Запускаем периодическое обновление статусов (каждые 3 сек)
+    // Периодическая проверка статусов
     window.readStatusInterval = setInterval(async () => {
         const sentMessages = messages.querySelectorAll('.self-end[data-mid]');
-        const sentIds = Array.from(sentMessages).map(el => parseInt(el.dataset.mid)).filter(id => !isNaN(id));
+        const sentIds = Array.from(sentMessages)
+            .map(el => parseInt(el.dataset.mid))
+            .filter(id => !isNaN(id))
+            .slice(-50);
+
         if (sentIds.length > 0) {
             const statuses = await getReadStatus(chatId, sentIds);
             Object.entries(statuses).forEach(([msgId, status]) => {
@@ -300,125 +477,14 @@ export async function openChat(chatId, initialName = 'Чат') {
         }
     }, 3000);
 
+    // Обновление статуса "в сети"
     if (window.statusInterval) clearInterval(window.statusInterval);
     setConnectionStatus();
 
+    // Фокус на инпут
     const messageInput = document.getElementById('messageInput');
-    if (messageInput) {
-        messageInput.focus();
-    }
+    if (messageInput) messageInput.focus();
+
+    console.log('✅ Чат успешно открыт:', chatId);
+    window.openingChat = null;
 }
-
-async function getParticipants(chatId) {
-    if (participantsCache[chatId]) {
-        const age = Date.now() - participantsCache[chatId].timestamp;
-        if (age < 5000) return participantsCache[chatId].data;
-    }
-
-    try {
-        const res = await fetch(`/api/chat_participants?chat_id=${chatId}`);
-        const data = await res.json();
-        if (data.success) {
-            participantsCache[chatId] = { data, timestamp: Date.now() };
-            return data;
-        }
-    } catch (err) {
-        console.error('Ошибка получения участников:', err);
-    }
-    return null;
-}
-
-let readTimeout;
-
-export async function markManyAsRead(messageIds, userId) {
-    if (!Array.isArray(messageIds) || messageIds.length === 0 || !userId) return;
-
-    clearTimeout(readTimeout);
-    readTimeout = setTimeout(async () => {
-        try {
-            await fetch('/api/messages/batch_read', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message_ids: messageIds, user_id: userId })
-            });
-        } catch (err) {
-            console.warn('Ошибка массового прочтения:', err);
-        }
-    }, 100);
-}
-
-export async function markAllReceivedAsRead(chatId) {
-    if (!window.currentUser || !chatId) return;
-
-    try {
-        const res = await fetch(`/api/messages/get?chat_id=${chatId}&limit=100`);
-        const data = await res.json();
-
-        if (!data.messages || !Array.isArray(data.messages)) return;
-
-        const received = data.messages
-            .filter(m => m.sender_id != window.currentUser.id && !m.read) // ← можно добавить флаг read
-            .map(m => m.id);
-
-        if (received.length === 0) return;
-
-        const maxId = Math.max(...received);
-        // Убрали: if (lastMarkedMessageId === maxId) return;
-
-        lastMarkedMessageId = maxId; // всё равно обновляем
-
-        await markManyAsRead([maxId], window.currentUser.id);
-
-        // Обновляем статусы своих сообщений
-        const sentIds = data.messages
-            .filter(m => m.sender_id == window.currentUser.id)
-            .map(m => m.id);
-
-        if (sentIds.length > 0) {
-            const statuses = await getReadStatus(chatId, sentIds);
-            Object.entries(statuses).forEach(([msgId, status]) => {
-                updateMessageStatus(parseInt(msgId), status);
-            });
-        }
-    } catch (err) {
-        console.warn('Ошибка отметки прочтения:', err);
-    }
-}
-
-
-export async function getReadStatus(chatId, messageIds) {
-    try {
-        const res = await fetch(
-    `/api/messages/read_status?chat_id=${chatId}&message_ids=${messageIds.join(',')}&user_id=${window.currentUser.id}&t=${Date.now()}`
-);
-
-        const data = await res.json();
-        const readBy = data.read_by || {};
-
-        // Получаем ID собеседника
-        let interlocutorId = null;
-        if (!interlocutorId) {
-            try {
-                const partRes = await fetch(`/api/chat_participants?chat_id=${chatId}`);
-                const partData = await partRes.json();
-                const interlocutor = partData.users?.find(u => u.id !== window.currentUser.id);
-                interlocutorId = interlocutor?.id || null;
-            } catch (err) {
-                console.warn('Не удалось получить участников');
-            }
-        }
-
-        const statuses = {};
-        for (const msgId of messageIds) {
-            const readers = readBy[msgId] || [];
-            // Теперь: прочитано, если собеседник в списке
-            const hasOtherUserRead = interlocutorId && readers.includes(Number(interlocutorId));
-            statuses[msgId] = hasOtherUserRead ? 'read' : 'delivered';
-        }
-        return statuses;
-    } catch (err) {
-        console.error('Ошибка статуса:', err);
-        return {};
-    }
-}
-

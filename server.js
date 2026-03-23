@@ -1,14 +1,18 @@
-// server.js — Полная, безопасная, масштабируемая версия
+// server.js — Полный сервер: чат, Redis, MySQL, Socket.IO
 
 const express = require('express');
 const { createServer } = require('http');
 const { Server } = require('socket.io');
-const mysql = require('mysql2/promise'); // ← используем promise-версию
-const bcrypt = require('bcrypt');
+const mysql = require('mysql2/promise');
+const jwt = require('jsonwebtoken');
+const redis = require('redis');
+const bcrypt = require('bcryptjs');
 
 const app = express();
+const PORT = process.env.PORT || 3000;
+const SECRET_KEY = process.env.JWT_SECRET || 'ваш_секретный_ключ_длиной_32_символа_или_больше_меняй_в_продакшене';
 
-// CORS вручную
+// CORS
 app.use((req, res, next) => {
     const allowedOrigin = 'https://service-taxi31.ru';
     const origin = req.headers.origin;
@@ -19,7 +23,7 @@ app.use((req, res, next) => {
     }
 
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
     if (req.method === 'OPTIONS') return res.status(200).end();
     next();
@@ -27,12 +31,18 @@ app.use((req, res, next) => {
 
 app.use(express.json());
 
+// Раздаём статику
+app.use(express.static('public'));
+
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
-    cors: { origin: "https://service-taxi31.ru", credentials: true }
+    cors: { origin: "https://service-taxi31.ru", credentials: true },
+    pingTimeout: 60000,
+    pingInterval: 25000,
+    upgradeTimeout: 20000
 });
 
-// 🔌 Подключение к MySQL через ПУЛ (вместо одного соединения)
+// 🔌 Подключение к MySQL
 let dbPool;
 (async () => {
     try {
@@ -45,160 +55,159 @@ let dbPool;
             waitForConnections: true,
             connectionLimit: 10,
             queueLimit: 0,
-            enableKeepAlive: true,
-            keepAliveInitialDelay: 0
+            enableKeepAlive: true
         });
-
-        // Проверка подключения
         await dbPool.getConnection();
-        console.log('✅ Подключились к MySQL через пул');
+        console.log('✅ Подключились к MySQL');
     } catch (err) {
-        console.error('❌ Ошибка подключения к MySQL:', err.message);
+        console.error('❌ Ошибка MySQL:', err.message);
     }
+})();
+
+// 🟩 Подключение к Redis
+let redisClient;
+(async () => {
+    redisClient = redis.createClient({ url: 'redis://localhost:6379' });
+    redisClient.on('error', (err) => console.error('Redis error:', err));
+    await redisClient.connect();
+    console.log('✅ Подключились к Redis');
 })();
 
 // Онлайн пользователи
 const connectedUsers = new Set();
 const userSockets = new Map();
 
-// Middleware: проверка user_id
-io.use((socket, next) => {
-    const userId = socket.handshake.query.user_id;
-    if (!userId) return next(new Error("User ID required"));
-    socket.userId = userId;
-    next();
+// Аутентификация через JWT
+io.use(async (socket, next) => {
+    const token = socket.handshake.auth?.token;
+    if (!token) return next(new Error("Требуется токен"));
+
+    try {
+        const decoded = jwt.verify(token, SECRET_KEY);
+        socket.userId = String(decoded.userId);
+        next();
+    } catch (err) {
+        next(new Error("Неверный токен"));
+    }
 });
 
 io.on('connection', (socket) => {
-    const userId = String(socket.userId);
+    const userId = socket.userId;
 
     console.log(`🟢 Пользователь ${userId} подключился`);
     connectedUsers.add(userId);
     userSockets.set(userId, socket.id);
-
-    // Рассылаем обновление онлайна
     io.emit('online_update', { online: Array.from(connectedUsers) });
 
-    // Таймер: пользователь оффлайн через 60 сек без активности
-    let userTimeout;
+    // Обновление активности
+    const updateOnline = async () => {
+        await redisClient.SADD('online_users', userId);
+        await redisClient.EXPIRE('online_users', 60);
+    };
 
-    function resetTimeout() {
-    clearTimeout(userTimeout);
-userTimeout = setTimeout(() => {
-    console.log(`⏱️ Пользователь ${userId} отключен по таймауту`);
-    connectedUsers.delete(userId);
-    userSockets.delete(userId);
-    io.emit('online_update', { online: Array.from(connectedUsers) });
-}, 60000);
-
-// 🔁 Умное обновление last_active — не чаще чем раз в 30 сек
-(async () => {
-    try {
-        const [rows] = await dbPool.execute(
-            `SELECT last_active FROM user_activity WHERE user_id = ?`,
-            [userId]
-        );
-
-        const now = new Date();
-        if (rows.length > 0) {
-            const lastActive = new Date(rows[0].last_active);
-            const diffSec = (now - lastActive) / 1000;
-            if (diffSec < 30) return; // Не обновляем, если меньше 30 сек
-        }
-
-        // Обновляем только если прошло достаточно времени
-        await dbPool.execute(
-            `INSERT INTO user_activity (user_id, last_active) VALUES (?, NOW())
-             ON DUPLICATE KEY UPDATE last_active = NOW()`,
-            [userId]
-        );
-    } catch (err) {
-        console.error('Ошибка обновления активности:', err);
-    }
-})();
-
-}
-
+    let activityTimeout;
+    const resetTimeout = () => {
+        clearTimeout(activityTimeout);
+        updateOnline();
+        activityTimeout = setTimeout(() => {
+            connectedUsers.delete(userId);
+            userSockets.delete(userId);
+            io.emit('online_update', { online: Array.from(connectedUsers) });
+        }, 60000);
+    };
 
     resetTimeout();
-
-    // События, сбрасывающие таймер
     socket.on('send_message', resetTimeout);
     socket.on('join', resetTimeout);
     socket.on('user_active', resetTimeout);
 
+    // Печатает
+    socket.on('typing', ({ chat_id }) => {
+        socket.to(`chat_${chat_id}`).emit('user_typing', { chat_id, user_id: userId });
+    });
+
     // Отправка сообщения
     socket.on('send_message', async (data, callback) => {
-        console.log('📩 Получено сообщение:', data);
-        const { message_text: content } = data;
-        const chatId = socket.handshake.query.chat_id;
+        console.log('📩 [send_message] Получены данные:', JSON.stringify(data, null, 2));
+        const { message_text: content, reply_to_id, chat_id } = data;
+        const cid = Number(chat_id);
 
-        if (!content || !chatId) {
-            return callback?.({ success: false, error: 'Invalid data' });
+        if (!content || isNaN(cid)) return callback?.({ success: false, error: 'Invalid data' });
+
+        let replyData = null;
+        if (reply_to_id) {
+            try {
+                const [rows] = await dbPool.execute(
+                    `SELECT m.content, u.username FROM messages m JOIN users u ON m.sender_id = u.id WHERE m.id = ? AND m.chat_id = ?`,
+                    [reply_to_id, cid]
+                );
+                replyData = rows[0] ? {
+                    reply_to: reply_to_id,
+                    reply_text: rows[0].content,
+                    reply_sender: rows[0].username,
+                    reply_sender_id: rows[0].sender_id
+                } : {
+                    reply_to: reply_to_id,
+                    reply_text: '[сообщение удалено]',
+                    reply_sender: 'Собеседник'
+                };
+            } catch (err) {
+                replyData = { reply_to: reply_to_id, reply_text: '[ошибка]', reply_sender: 'Собеседник' };
+            }
         }
 
         try {
-            const [result] = await dbPool.execute(
-                `INSERT INTO messages (chat_id, sender_id, content) VALUES (?, ?, ?)`,
-                [chatId, userId, content]
+            const [r] = await dbPool.execute(
+                `INSERT INTO messages (chat_id, reply_to, sender_id, content, reply_text, reply_sender) VALUES (?, ?, ?, ?, ?, ?)`,
+                [cid, reply_to_id || null, userId, content, replyData?.reply_text || null, replyData?.reply_sender || null]
             );
 
-            const message = {
-                id: result.insertId,
-                chat_id: Number(chatId),
-                sender_id: Number(userId),
+            const msg = {
+                id: r.insertId,
+                chat_id: cid,
+                sender_id: userId,
                 content,
-                sent_at: new Date().toISOString()
+                sent_at: new Date().toISOString(),
+                ...replyData
             };
 
-            io.to(`chat_${chatId}`).emit('new_message', message);
-            callback?.({ success: true, message_id: message.id });
+            io.to(`chat_${cid}`).emit('new_message', msg);
+            callback?.({ success: true, message_id: msg.id });
         } catch (err) {
             console.error('Ошибка отправки:', err);
             callback?.({ success: false, error: 'DB error' });
         }
     });
 
-    // Присоединение к чату
-    socket.on('join', ({ chat_id }) => {
+    socket.on('join', ({ chat_id }, cb) => {
         socket.join(`chat_${chat_id}`);
-        console.log(`👤 ${userId} присоединился к чату ${chat_id}`);
+        cb?.({ success: true });
     });
 
-    // Отключение
-    socket.on('disconnect', () => {
-        clearTimeout(userTimeout);
-        console.log(`🔴 Пользователь ${userId} отключился`);
-
-        if (connectedUsers.has(userId)) {
-            connectedUsers.delete(userId);
-            userSockets.delete(userId);
-            io.emit('online_update', { online: Array.from(connectedUsers) });
-        }
-
-        // Обновляем last_seen при выходе
-        dbPool.execute(`UPDATE users SET last_seen = NOW() WHERE id = ?`, [userId]).catch(console.error);
+    socket.on('disconnect', async () => {
+        clearTimeout(activityTimeout);
+        connectedUsers.delete(userId);
+        userSockets.delete(userId);
+        io.emit('online_update', { online: Array.from(connectedUsers) });
+        await dbPool.execute(`UPDATE users SET last_seen = NOW() WHERE id = ?`, [userId]).catch(console.error);
     });
 });
 
-// === API: Кто онлайн? ===
+// === 🔹 API: Кто онлайн? ===
 app.get('/api/online', async (req, res) => {
     try {
-        const [rows] = await dbPool.execute(`
-            SELECT user_id FROM user_activity 
-            WHERE last_active > DATE_SUB(NOW(), INTERVAL 60 SECOND)
-        `);
-        const online = rows.map(r => String(r.user_id));
+        const online = await redisClient.SMEMBERS('online_users');
         res.json({ online });
     } catch (err) {
-        console.error('Ошибка /api/online:', err);
         res.status(500).json({ online: [] });
     }
 });
 
-// === API: Чаты пользователя ===
+// === 🔹 API: Чаты пользователя ===
 app.get('/api/chats', async (req, res) => {
-    const userId = req.query.user_id;
+    const { user_id: userId } = req.query;
+    if (!userId) return res.status(400).json({ success: false, error: 'user_id required' });
+
     try {
         const [chats] = await dbPool.execute(`
             SELECT 
@@ -217,14 +226,12 @@ app.get('/api/chats', async (req, res) => {
             ORDER BY m.id DESC
         `, [userId, userId]);
 
-        // 🔽 Получаем онлайн-статус
         const [onlineRows] = await dbPool.execute(`
             SELECT user_id FROM user_activity 
             WHERE last_active > DATE_SUB(NOW(), INTERVAL 60 SECOND)
         `);
         const onlineIds = new Set(onlineRows.map(r => String(r.user_id)));
 
-        // 🔽 Добавляем .online
         const chatsWithStatus = chats.map(chat => ({
             ...chat,
             online: onlineIds.has(String(chat.interlocutor_id))
@@ -232,259 +239,166 @@ app.get('/api/chats', async (req, res) => {
 
         res.json({ success: true, chats: chatsWithStatus });
     } catch (err) {
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
-
-
-// === API: Получить сообщения ===
-app.get('/api/messages/get', async (req, res) => {
-    const { chat_id } = req.query;
-    try {
-        const [messages] = await dbPool.execute(`
-            SELECT m.*, u.username FROM messages m
-            JOIN users u ON m.sender_id = u.id
-            WHERE m.chat_id = ?
-            ORDER BY m.sent_at ASC
-        `, [chat_id]);
-        res.json({ success: true, messages });
-    } catch (err) {
-        console.error('Ошибка загрузки сообщений:', err);
+        console.error('Ошибка загрузки чатов:', err);
         res.status(500).json({ success: false, error: 'DB error' });
     }
 });
 
-// === API: Статус прочтения ===
-app.get('/api/messages/read_status', async (req, res) => {
-    const { chat_id, message_ids, user_id } = req.query;
-    const ids = (message_ids || '').split(',').map(Number).filter(id => id > 0);
-
-    if (!chat_id || !user_id || ids.length === 0) {
-        return res.json({ read_by: {} });
-    }
-
-    try {
-        const placeholders = ids.map(() => '?').join(',');
-        const [rows] = await dbPool.execute(`
-            SELECT mr.message_id, mr.user_id
-            FROM message_reads mr
-            JOIN messages m ON mr.message_id = m.id
-            WHERE m.chat_id = ? AND mr.message_id IN (${placeholders})
-        `, [chat_id, ...ids]);
-
-        const readBy = {};
-        ids.forEach(id => (readBy[id] = []));
-        rows.forEach(row => readBy[row.message_id].push(row.user_id));
-
-        res.json({ read_by: readBy });
-    } catch (err) {
-        console.error('Ошибка read_status:', err);
-        res.status(500).json({ read_by: {} });
-    }
-});
-
-// === API: Отметить как прочитанное ===
-app.post('/api/messages/read', async (req, res) => {
-    const { message_id, user_id } = req.body;
-    if (!message_id || !user_id) {
-        return res.status(400).json({ success: false });
-    }
-
-    try {
-        await dbPool.execute(
-            `INSERT IGNORE INTO message_reads (message_id, user_id, read_at) VALUES (?, ?, NOW())`,
-            [message_id, user_id]
-        );
-        io.emit('message_read', { message_id: Number(message_id), user_id: Number(user_id) });
-        res.json({ success: true });
-    } catch (err) {
-        console.error('Ошибка отметки прочтения:', err);
-        res.status(500).json({ success: false });
-    }
-});
-
-// === API: Массовое прочтение ===
-app.post('/api/messages/batch_read', async (req, res) => {
-    const { message_ids, user_id } = req.body;
-    if (!Array.isArray(message_ids) || message_ids.length === 0 || !user_id) {
-        return res.status(400).json({ success: false });
-    }
-
-    try {
-        const placeholders = Array(message_ids.length).fill('?').join(',');
-        const [validMessages] = await dbPool.execute(`
-            SELECT m.id, m.chat_id FROM messages m
-            JOIN chat_participants cp ON m.chat_id = cp.chat_id
-            WHERE m.id IN (${placeholders}) AND cp.user_id = ?
-        `, [...message_ids, user_id]);
-
-
-        const validIds = validMessages.map(m => m.id);
-        if (validIds.length === 0) {
-            console.log(`🟡 Нет доступных сообщений для прочтения: user=${user_id}`);
-            return res.json({ success: true });
-        }
-
-        const chatId = validMessages[0].chat_id;
-
-        // Получаем всех, кроме текущего пользователя
-        const [participants] = await dbPool.execute(
-            `SELECT user_id FROM chat_participants WHERE chat_id = ? AND user_id != ?`,
-            [chatId, user_id]
-        );
-
-        // Массово вставляем в message_reads
-        const readPlaceholders = validIds.map(() => '(?, ?, NOW())').join(',');
-        const readValues = validIds.flatMap(id => [id, user_id]);
-
-        await dbPool.execute(`
-            INSERT IGNORE INTO message_reads (message_id, user_id, read_at) VALUES ${readPlaceholders}
-        `, readValues);
-
-        // Отправляем ТОЛЬКО собеседникам
-        participants.forEach(participant => {
-            const sockId = userSockets.get(String(participant.user_id));
-            if (sockId) {
-                validIds.forEach(id => {
-                    console.log(`📤 СЕРВЕР: отправлено message_read(${id}) от user=${user_id} → user=${participant.user_id}`);
-                    io.to(sockId).emit('message_read', {
-                        message_id: id,
-                        user_id: Number(user_id)
-                    });
-                });
-            }
-        });
-
-        res.json({ success: true });
-    } catch (err) {
-        console.error('batch_read error:', err);
-        res.status(500).json({ success: false });
-    }
-});
-
-
-
-
-// === API: Участники чата ===
-app.get('/api/chat_participants', async (req, res) => {
-    const { chat_id } = req.query;
-    const [users] = await dbPool.execute(`
-        SELECT u.id, u.username, u.last_seen FROM users u
-        JOIN chat_participants cp ON u.id = cp.user_id
-        WHERE cp.chat_id = ?
-    `, [chat_id]);
-
-    const [onlineRows] = await dbPool.execute(`
-        SELECT user_id FROM user_activity 
-        WHERE last_active > DATE_SUB(NOW(), INTERVAL 60 SECOND)
-    `);
-    const onlineIds = new Set(onlineRows.map(r => String(r.user_id)));
-
-    const withOnline = users.map(u => ({
-        ...u,
-        online: onlineIds.has(String(u.id))
-    }));
-
-    res.json({ success: true, users: withOnline });
-});
-
-// === API: Поиск пользователей ===
-app.get('/api/search_users', async (req, res) => {
-    const { q, user_id } = req.query;
-    const [users] = await dbPool.execute(`
-        SELECT id, username, last_seen FROM users 
-        WHERE id != ? AND username LIKE ? LIMIT 10
-    `, [user_id, `%${q}%`]);
-
-    const [onlineRows] = await dbPool.execute(`
-        SELECT user_id FROM user_activity 
-        WHERE last_active > DATE_SUB(NOW(), INTERVAL 60 SECOND)
-    `);
-    const onlineIds = new Set(onlineRows.map(r => String(r.user_id)));
-
-    const withOnline = users.map(u => ({
-        ...u,
-        online: onlineIds.has(String(u.id))
-    }));
-
-    res.json({ users: withOnline });
-});
-
-// === API: Вход ===
+// === 🔹 API: Вход → выдаём JWT ===
 app.post('/api/login', async (req, res) => {
     const { username, password } = req.body;
     if (!username || !password) return res.status(400).json({ error: 'Логин и пароль обязательны' });
 
     try {
-        let user;
         const phoneClean = username.replace(/\D/g, '');
-        if (phoneClean.length >= 10) {
-            const [rows] = await dbPool.execute(`SELECT id, username, email, phone, password_hash FROM users WHERE phone LIKE ?`, [`%${phoneClean}`]);
-            user = rows[0];
-        } else {
-            const [rows] = await dbPool.execute(`SELECT id, username, email, phone, password_hash FROM users WHERE username = ?`, [username]);
-            user = rows[0];
-        }
+        const [rows] = await dbPool.execute(
+            phoneClean.length >= 10
+                ? `SELECT id, username, password_hash FROM users WHERE phone LIKE ?`
+                : `SELECT id, username, password_hash FROM users WHERE username = ?`,
+            [phoneClean.length >= 10 ? `%${phoneClean}` : username]
+        );
 
+        const user = rows[0];
         if (!user) return res.status(401).json({ error: 'Неверный логин или пароль' });
 
-        let isMatch = false, needsRehash = false;
-        if (user.password_hash.startsWith('$2b$') || user.password_hash.startsWith('$2a$')) {
-            isMatch = bcrypt.compareSync(password, user.password_hash);
-        } else {
-            if (user.password_hash === password) {
-                isMatch = true;
-                needsRehash = true;
-            }
-        }
+        const isMatch = user.password_hash.startsWith('$2')
+    ? bcrypt.compareSync(password, user.password_hash)
+    : user.password_hash === password;
+
 
         if (isMatch) {
             delete user.password_hash;
-            await dbPool.execute(`UPDATE users SET last_seen = NOW() WHERE id = ?`, [user.id]);
-            if (needsRehash) {
-                const newHash = bcrypt.hashSync(password, 10);
-                await dbPool.execute(`UPDATE users SET password_hash = ? WHERE id = ?`, [newHash, user.id]);
-            }
-            return res.json({ success: true, user });
+            const token = jwt.sign({ userId: user.id }, SECRET_KEY, { expiresIn: '7d' });
+            res.json({ success: true, user, token });
         } else {
-            return res.status(401).json({ error: 'Неверный логин или пароль' });
+            res.status(401).json({ error: 'Неверный пароль' });
         }
-    } catch (err) {
-        console.error('Ошибка входа:', err);
-        return res.status(500).json({ error: 'Ошибка сервера' });
-    }
+    
+} catch (err) {
+    console.error('❌ Ошибка входа:', {
+        message: err.message,
+        stack: err.stack,
+        type: typeof err,
+        keys: Object.keys(err)
+    });
+   
+}
+
 });
 
-// === API: Регистрация ===
-app.post('/api/register', async (req, res) => {
-    const { username, email, phone, password } = req.body;
-    if (!username || !email || !phone || !password) return res.status(400).json({ error: 'Все поля обязательны' });
-
-    const phoneClean = phone.replace(/\D/g, '');
-    if (phoneClean.length !== 11 || !phoneClean.startsWith('7')) return res.status(400).json({ error: 'Некорректный номер телефона' });
-    if (password.length < 6) return res.status(400).json({ error: 'Пароль должен быть не менее 6 символов' });
+// === 🔹 Получение участников чата ===
+app.get('/api/chat_participants', async (req, res) => {
+    const { chat_id } = req.query;
+    if (!chat_id) return res.status(400).json({ success: false, error: 'chat_id required' });
 
     try {
-        const [existing] = await dbPool.execute(`SELECT id FROM users WHERE username = ? OR phone = ?`, [username, phoneClean]);
-        if (existing.length > 0) return res.status(409).json({ error: 'Логин или телефон уже заняты' });
-
-        const hash = bcrypt.hashSync(password, 10);
-        const [result] = await dbPool.execute(
-            `INSERT INTO users (username, email, phone, password_hash, last_seen) VALUES (?, ?, ?, ?, NOW())`,
-            [username, email, phoneClean, hash]
+        const [users] = await dbPool.execute(
+            `SELECT u.id, u.username, u.last_seen 
+             FROM chat_participants cp 
+             JOIN users u ON u.id = cp.user_id 
+             WHERE cp.chat_id = ?`,
+            [chat_id]
         );
-
-        const userId = result.insertId;
-        const user = { id: userId, username, email, phone: phoneClean };
-        return res.json({ success: true, user });
+        res.json({ success: true, users });
     } catch (err) {
-        console.error('Ошибка регистрации:', err);
-        return res.status(500).json({ error: 'Ошибка сервера' });
+        console.error('Ошибка участников:', err);
+        res.status(500).json({ success: false, error: 'DB error' });
     }
 });
 
+// === 🔹 Получение сообщений чата ===
+app.get('/api/messages/get', async (req, res) => {
+    const { chat_id, limit = 50, offset = 0 } = req.query;
+    if (!chat_id) return res.status(400).json({ success: false, error: 'chat_id required' });
+
+    try {
+        const [messages] = await dbPool.execute(
+            `SELECT 
+                m.id, m.chat_id, m.sender_id, m.content, m.sent_at,
+                m.reply_to, m.reply_text, m.reply_sender,
+                u.username AS sender_name 
+             FROM messages m 
+             JOIN users u ON u.id = m.sender_id 
+             WHERE m.chat_id = ? 
+             ORDER BY m.id DESC 
+             LIMIT ? OFFSET ?`,
+            [chat_id, parseInt(limit), parseInt(offset)]
+        );
+
+        res.json({ success: true, messages });
+    } catch (err) {
+        console.error('Ошибка сообщений:', err);
+        res.status(500).json({ success: false, error: 'DB error' });
+    }
+});
+
+
+
+// === 🔹 Отметка сообщений как прочитанных ===
+app.post('/api/messages/batch_read', async (req, res) => {
+    const { message_ids, user_id } = req.body;
+    if (!Array.isArray(message_ids) || !user_id) {
+        return res.status(400).json({ success: false, error: 'Invalid data' });
+    }
+
+    try {
+        for (const msgId of message_ids) {
+            await dbPool.execute(
+                `INSERT IGNORE INTO message_reads (message_id, user_id) VALUES (?, ?)`,
+                [msgId, user_id]
+            );
+            const chatId = await getChatIdByMessageId(msgId);
+            if (chatId) {
+                io.to(`chat_${chatId}`).emit('message_read', { message_id: msgId, user_id });
+            }
+        }
+        res.json({ success: true });
+    } catch (err) {
+        console.error('Ошибка прочтения:', err);
+        res.status(500).json({ success: false, error: 'DB error' });
+    }
+});
+
+// === 🔹 Получение статуса прочтения ===
+app.get('/api/messages/read_status', async (req, res) => {
+    const { chat_id, message_ids, user_id } = req.query;
+    if (!chat_id || !message_ids || !user_id) {
+        return res.json({ read_by: {} });
+    }
+
+    const ids = message_ids.split(',').map(id => parseInt(id)).filter(id => !isNaN(id));
+    if (ids.length === 0) return res.json({ read_by: {} });
+
+    try {
+        const [reads] = await dbPool.execute(
+            `SELECT message_id, user_id FROM message_reads WHERE message_id IN (?)`,
+            [ids]
+        );
+
+        const readBy = {};
+        for (const { message_id, user_id: reader_id } of reads) {
+            if (!readBy[message_id]) readBy[message_id] = [];
+            readBy[message_id].push(reader_id);
+        }
+
+        res.json({ read_by: readBy });
+    } catch (err) {
+        console.error('Ошибка статуса:', err);
+        res.json({ read_by: {} });
+    }
+});
+
+// Вспомогательная функция
+async function getChatIdByMessageId(messageId) {
+    const [rows] = await dbPool.execute(
+        `SELECT chat_id FROM messages WHERE id = ?`,
+        [messageId]
+    );
+    return rows[0]?.chat_id || null;
+}
+
 // Запуск сервера
-const PORT = process.env.PORT || 3000;
 httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Сервер запущен на порту ${PORT}`);
 });
+

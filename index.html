@@ -94,14 +94,16 @@
         const payload = Object.fromEntries(data);
 
         try {
-            const res = await fetch('/api/login', {  // 🔥 БЕЗ .php!
+            const res = await fetch('/api/login', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
             const result = await res.json();
             if (result.success) {
+                // ✅ Сохраняем и пользователя, и токен
                 localStorage.setItem('currentUser', JSON.stringify(result.user));
+                localStorage.setItem('authToken', result.token);
                 alert('Вход выполнен!');
                 window.location.href = 'chat.html';
             } else {
@@ -134,7 +136,7 @@
         }
 
         try {
-            const res = await fetch('/api/register', {  // 🔥 БЕЗ .php!
+            const res = await fetch('/api/register', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -158,6 +160,7 @@
         }
     }
 }"
+
 
         class="w-full max-w-md bg-white dark:bg-gray-800 rounded-2xl shadow-xl overflow-hidden border border-gray-200 dark:border-gray-700">
 

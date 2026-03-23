@@ -4,7 +4,7 @@ import '/js/search.js';
 
 window.currentUser = null;
 window.currentChatId = null;
-window.currentMessageElement = null; // Для доступа из других модулей
+window.currentMessageElement = null;
 
 window.loadChats = async () => {
     try {
@@ -59,14 +59,12 @@ window.loadChats = async () => {
 // === КОНТЕКСТНОЕ МЕНЮ ===
 const contextMenu = document.getElementById('contextMenu');
 
-// Скрываем при клике вне
 document.addEventListener('click', (e) => {
     if (!contextMenu.contains(e.target) && !e.target.closest('.message-bubble')) {
         contextMenu.classList.add('hidden');
     }
 });
 
-// Обработка правого клика
 document.addEventListener('contextmenu', (e) => {
     const bubble = e.target.closest('.message-bubble');
     if (!bubble || !bubble.dataset.mid) return;
@@ -74,7 +72,6 @@ document.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     window.currentMessageElement = bubble;
 
-    // Показываем для измерения
     contextMenu.classList.remove('hidden');
     contextMenu.style.position = 'fixed';
     contextMenu.style.visibility = 'hidden';
@@ -119,8 +116,14 @@ document.addEventListener('DOMContentLoaded', () => {
         window.location.href = 'index.html';
         return;
     }
-
+    
     const chatApp = document.getElementById('chatApp');
+    chatApp.style.display = 'block';
+    window.loadChats();
+    const lastChatId = localStorage.getItem('lastOpenedChat');
+    if (lastChatId) {
+        openChat(lastChatId);
+    }
     const logoutBtn = document.getElementById('logout');
     const logoutFromProfile = document.getElementById('logoutFromProfile');
     const themeToggle = document.getElementById('themeToggle');
@@ -239,28 +242,69 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(wakeUpServer, 600000);
     wakeUpServer();
 
-    // Автофокус и ресайз textarea
-    messageInput?.addEventListener('input', function () {
-        this.style.height = 'auto';
-        this.style.height = `${Math.min(this.scrollHeight, 100)}px`;
-    });
+   // Автофокус и ресайз textarea + отправка "печатает"
+let typingTimer; // Таймер для ограничения частоты отправки
 
-    // Отправка сообщения
-    messageForm?.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const text = messageInput.value.trim();
-        const chatId = window.currentChatId;
-        if (!text || !chatId || !window.currentUser) return;
+messageInput?.addEventListener('input', function () {
+    this.style.height = 'auto';
+    this.style.height = `${Math.min(this.scrollHeight, 100)}px`;
 
+    // Если есть открытый чат — отправляем сигнал "печатает"
+    if (window.currentChatId) {
+        // Импортируем функцию и отправляем событие
+        import('./socket.js').then(m => m.sendTyping(window.currentChatId));
+        
+        // Ограничиваем отправку — не чаще раза в 2.5 секунды (анти-флуд)
+        clearTimeout(typingTimer);
+        typingTimer = setTimeout(() => {}, 2500);
+    }
+});
+
+
+function handleSendMessage(e) {
+    e.preventDefault();
+    const text = messageInput.value.trim();
+    const chatId = window.currentChatId;
+    if (!text || !chatId || !window.currentUser) return;
+
+    const replyData = window.getReplyData?.();
+    const replyToId = replyData 
+        ? (String(replyData.messageId).startsWith('temp_') ? null : Number(replyData.messageId))
+        : null;
+
+    if (replyToId !== null && isNaN(replyToId)) {
+        console.warn('⚠️ Некорректный reply_to_id, игнорируем:', replyData?.messageId);
+    }
+
+    import('./socket.js').then(async ({ sendMessage }) => {
         try {
-            await import('./socket.js').then(m => m.sendMessage(text, chatId));
+            await sendMessage(text, chatId, replyToId);
+
             messageInput.value = '';
             messageInput.style.height = 'auto';
+            window.cancelReply?.();
+
         } catch (err) {
             alert('Не удалось отправить сообщение');
+            console.error('Ошибка отправки:', err);
+            messageInput.value = text;
+        }
+    });
+}
+
+
+    // Отправка по Enter
+    messageInput?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey && !e.altKey && !e.ctrlKey) {
+            e.preventDefault();
+            handleSendMessage(e);
         }
     });
 
+    // Отправка по кнопке
+    messageForm?.addEventListener('submit', handleSendMessage);
+
+    // Фокусировка чата
     messageInput?.addEventListener('focus', () => {
         requestAnimationFrame(() => {
             requestAnimationFrame(() => {
